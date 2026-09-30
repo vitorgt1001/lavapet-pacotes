@@ -210,8 +210,15 @@ def cadastrar_novo_pacote(dados: dict):
     """
     aba = _worksheet(ABA_PACOTES)
     linha = _mapear_valores_por_cabecalho(aba, dados)
-    aba.append_row(linha, value_input_option="USER_ENTERED")
-    numero_linha_nova = len(aba.get_all_values())
+        # NÃO usamos aba.append_row() aqui de propósito: como a planilha tem
+    # centenas de linhas em branco com só uma caixinha marcada na coluna
+    # "Marcar Atendimento", o Google Sheets tenta adivinhar sozinho onde
+    # começa a "tabela" pra anexar a linha — e erra, grudando os dados a
+    # partir dessa coluna em vez da A. Em vez disso, calculamos a próxima
+    # linha vazia nós mesmos e escrevemos explicitamente a partir da
+    # coluna A, sem chance de errar de coluna.
+    numero_linha_nova = len(aba.get_all_values()) + 1
+    aba.update(f"A{numero_linha_nova}", [linha], value_input_option="USER_ENTERED")
     _herdar_formulas_da_linha_anterior(aba, numero_linha_nova)
 
 
