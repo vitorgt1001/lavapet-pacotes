@@ -15,7 +15,6 @@ Toda a comunicação com o "mundo de fora" do app fica concentrada aqui:
 """
 
 import os
-import re
 import pandas as pd
 import gspread
 import requests
@@ -163,48 +162,36 @@ def _mapear_valores_por_cabecalho(aba, valores_por_nome_coluna: dict):
 
 def _herdar_formulas_da_linha_anterior(aba, numero_linha_nova):
     """
-    Sua planilha calcula 'Saldo' (e outras colunas) com fórmula em cada
-    linha (ex: =E2-F2). Quando o app adiciona uma linha nova por baixo
-    dos panos, o Google Sheets NÃO copia fórmula nenhuma pra linha nova
-    sozinho — só copia quando alguém arrasta manualmente pela interface.
-    Sem isso, a linha nova ficaria com 'Saldo' em branco.
+    Sua planilha calcula 'Saldo' com fórmula em cada linha — a coluna G
+    (saldo em quantidade: =E-F) e a coluna N (saldo em valor). Quando o
+    app adiciona uma linha nova por baixo dos panos, o Google Sheets NÃO
+    copia fórmula nenhuma pra linha nova sozinho — só copia quando
+    alguém arrasta manualmente pela interface. Sem isso, a linha nova
+    ficaria com 'Saldo' em branco.
 
-    Essa função corrige isso: procura a linha de dados mais próxima ACIMA
-    que realmente tenha alguma fórmula (a linha logo acima pode ser uma
-    das centenas de linhas em branco sem fórmula nenhuma — nesse caso,
-    continua subindo até achar uma de verdade), pega toda fórmula que
-    achar nela (célula começando com '='), e recria a mesma fórmula na
-    linha nova, ajustando o número da linha.
+    Em vez de tentar "procurar" uma linha de cima pra copiar (isso deu
+    problema com a planilha tendo quase mil linhas em branco no meio),
+    a gente já sabe exatamente qual é o formato dessas duas fórmulas
+    (conferido direto na sua planilha, na linha da Luciana), então
+    recria elas direto, só trocando o número da linha. Mais simples e
+    não depende de "achar" uma linha de exemplo em lugar nenhum.
+
+    Se um dia você mudar essas fórmulas na planilha (por exemplo, mudar
+    o jeito que o 'Saldo' é calculado), me avisa que eu ajusto aqui
+    também — do contrário, as linhas novas continuam usando este
+    padrão.
     """
-    if numero_linha_nova < 3:
-        return  # linha nova é a primeira linha de dados, não tem o que herdar
+    l = numero_linha_nova
+    formula_saldo_quantidade = f"=E{l}-F{l}"
+    formula_saldo_valor = f'=SE(F{l}="";"";SE(F{l}=0;;L{l}*F{l}*0,9-I{l}))'
 
-    # Busca todas as linhas de 2 até a anterior de uma vez só (mais rápido
-    # que perguntar linha por linha), e usa a última que tiver fórmula.
-    celulas = aba.get(f"2:{numero_linha_nova - 1}", value_render_option="FORMULA")
-    numero_linha_origem = None
-    linha_formulas = None
-    for deslocamento, linha_valores in enumerate(celulas):
-        if any(isinstance(v, str) and v.startswith("=") for v in linha_valores):
-            numero_linha_origem = 2 + deslocamento
-            linha_formulas = linha_valores
-
-    if linha_formulas is None:
-        return  # nenhuma linha acima tem fórmula — nada pra herdar
-
-    atualizacoes = []
-    for indice, conteudo in enumerate(linha_formulas):
-        if isinstance(conteudo, str) and conteudo.startswith("="):
-            nova_formula = re.sub(
-                rf"(?<=[A-Za-z]){numero_linha_origem}\b",
-                str(numero_linha_nova),
-                conteudo,
-            )
-            coluna_a1 = gspread.utils.rowcol_to_a1(numero_linha_nova, indice + 1)
-            atualizacoes.append({"range": coluna_a1, "values": [[nova_formula]]})
-
-    if atualizacoes:
-        aba.batch_update(atualizacoes, value_input_option="USER_ENTERED")
+    aba.batch_update(
+        [
+            {"range": f"G{l}", "values": [[formula_saldo_quantidade]]},
+            {"range": f"N{l}", "values": [[formula_saldo_valor]]},
+        ],
+        value_input_option="USER_ENTERED",
+    )
 
 
 def cadastrar_novo_pacote(dados: dict):
@@ -216,7 +203,7 @@ def cadastrar_novo_pacote(dados: dict):
          "Data Compra": "2026-09-30"}
 
     Colunas de fórmula (como 'Saldo') não precisam vir nesse dict — são
-    preenchidas automaticamente copiando a fórmula da linha anterior.
+    preenchidas automaticamente com a fórmula certa.
     """
     aba = _worksheet(ABA_PACOTES)
     linha = _mapear_valores_por_cabecalho(aba, dados)
@@ -228,7 +215,15 @@ def cadastrar_novo_pacote(dados: dict):
     # partir dessa coluna em vez da A. Em vez disso, calculamos a próxima
     # linha vazia nós mesmos e escrevemos explicitamente a partir da
     # coluna A, sem chance de errar de coluna.
-    numero_linha_nova = len(aba.get_all_values()) + 1
+    #
+    # E calculamos essa "próxima linha vazia" olhando só a coluna A
+    # (Telefone) — não a linha inteira. Se olhássemos a linha inteira, a
+    # gente ia cair lá embaixo, depois de todas aquelas centenas de
+    # linhas de template (que têm a coluna A vazia, mas têm a caixinha
+    # da coluna J marcada). Olhando só a coluna A, a linha nova cai bem
+    # depois do seu último cliente real — sem aquele monte de linhas em
+    # branco no meio.
+    numero_linha_nova = len(aba.col_values(1)) + 1
 
     # A planilha tem um número fixo de linhas (o "tamanho da grade"). Se a
     # linha nova ultrapassar esse limite, adiciona mais linhas em branco
