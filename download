@@ -1,0 +1,6 @@
+# Nunca suba estes arquivos pro GitHub — têm suas senhas e credenciais.
+.env
+credenciais_google.json
+.streamlit/secrets.toml
+__pycache__/
+*.pyc
