@@ -82,6 +82,15 @@ if pagina == "📊 Painel de Pacotes":
     col_condominio = next((c for c in df.columns if "condom" in c.lower()), None)
     col_servico = next((c for c in df.columns if "servi" in c.lower()), None)
     col_nome = next((c for c in df.columns if c.lower().strip() == "nome"), None)
+    
+    # Sua planilha tem várias linhas em branco pré-formatadas lá embaixo
+    # (com fórmula de saldo mas sem cliente nenhum) — não contam como pacote.
+    if col_nome:
+        df = df[df[col_nome].astype(str).str.strip() != ""]
+
+    if df.empty:
+        st.info("Nenhum pacote cadastrado ainda.")
+        st.stop()
     col_telefone = next((c for c in df.columns if "telefone" in c.lower()), None)
 
     if col_qtd_comprada and col_qtd_usada:
