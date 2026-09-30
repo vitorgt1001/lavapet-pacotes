@@ -218,8 +218,16 @@ def cadastrar_novo_pacote(dados: dict):
     # linha vazia nós mesmos e escrevemos explicitamente a partir da
     # coluna A, sem chance de errar de coluna.
     numero_linha_nova = len(aba.get_all_values()) + 1
+  
+
+    # A planilha tem um número fixo de linhas (o "tamanho da grade"). Se a
+    # linha nova ultrapassar esse limite, adiciona mais linhas em branco
+    # automaticamente antes de escrever, pra nunca dar erro de "exceeds
+    # grid limits".
+    if numero_linha_nova > aba.row_count:
+        aba.add_rows(numero_linha_nova - aba.row_count + 500)
+
     aba.update(f"A{numero_linha_nova}", [linha], value_input_option="USER_ENTERED")
-    _herdar_formulas_da_linha_anterior(aba, numero_linha_nova)
 
 
 def chamar_api_apps_script(acao: str, **kwargs):
