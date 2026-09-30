@@ -165,28 +165,38 @@ def _herdar_formulas_da_linha_anterior(aba, numero_linha_nova):
     """
     Sua planilha calcula 'Saldo' (e outras colunas) com fórmula em cada
     linha (ex: =E2-F2). Quando o app adiciona uma linha nova por baixo
-    dos panos (append_row), o Google Sheets NÃO copia fórmula nenhuma
-    pra linha nova sozinho — só copia quando alguém arrasta manualmente
-    pela interface. Sem isso, a linha nova ficaria com 'Saldo' em branco.
+    dos panos, o Google Sheets NÃO copia fórmula nenhuma pra linha nova
+    sozinho — só copia quando alguém arrasta manualmente pela interface.
+    Sem isso, a linha nova ficaria com 'Saldo' em branco.
 
-    Essa função corrige isso: olha a linha de dados anterior, pega toda
-    fórmula que achar (célula começando com '='), e recria a mesma
-    fórmula na linha nova, ajustando o número da linha.
+    Essa função corrige isso: procura a linha de dados mais próxima ACIMA
+    que realmente tenha alguma fórmula (a linha logo acima pode ser uma
+    das centenas de linhas em branco sem fórmula nenhuma — nesse caso,
+    continua subindo até achar uma de verdade), pega toda fórmula que
+    achar nela (célula começando com '='), e recria a mesma fórmula na
+    linha nova, ajustando o número da linha.
     """
-    numero_linha_anterior = numero_linha_nova - 1
-    if numero_linha_anterior < 2:
+    if numero_linha_nova < 3:
         return  # linha nova é a primeira linha de dados, não tem o que herdar
 
-    celulas = aba.get(f"{numero_linha_anterior}:{numero_linha_anterior}", value_render_option="FORMULA")
-    if not celulas:
-        return
-    linha_formulas = celulas[0]
+    # Busca todas as linhas de 2 até a anterior de uma vez só (mais rápido
+    # que perguntar linha por linha), e usa a última que tiver fórmula.
+    celulas = aba.get(f"2:{numero_linha_nova - 1}", value_render_option="FORMULA")
+    numero_linha_origem = None
+    linha_formulas = None
+    for deslocamento, linha_valores in enumerate(celulas):
+        if any(isinstance(v, str) and v.startswith("=") for v in linha_valores):
+            numero_linha_origem = 2 + deslocamento
+            linha_formulas = linha_valores
+
+    if linha_formulas is None:
+        return  # nenhuma linha acima tem fórmula — nada pra herdar
 
     atualizacoes = []
     for indice, conteudo in enumerate(linha_formulas):
         if isinstance(conteudo, str) and conteudo.startswith("="):
             nova_formula = re.sub(
-                rf"(?<=[A-Za-z]){numero_linha_anterior}\b",
+                rf"(?<=[A-Za-z]){numero_linha_origem}\b",
                 str(numero_linha_nova),
                 conteudo,
             )
@@ -210,7 +220,8 @@ def cadastrar_novo_pacote(dados: dict):
     """
     aba = _worksheet(ABA_PACOTES)
     linha = _mapear_valores_por_cabecalho(aba, dados)
-        # NÃO usamos aba.append_row() aqui de propósito: como a planilha tem
+
+    # NÃO usamos aba.append_row() aqui de propósito: como a planilha tem
     # centenas de linhas em branco com só uma caixinha marcada na coluna
     # "Marcar Atendimento", o Google Sheets tenta adivinhar sozinho onde
     # começa a "tabela" pra anexar a linha — e erra, grudando os dados a
@@ -218,7 +229,6 @@ def cadastrar_novo_pacote(dados: dict):
     # linha vazia nós mesmos e escrevemos explicitamente a partir da
     # coluna A, sem chance de errar de coluna.
     numero_linha_nova = len(aba.get_all_values()) + 1
-  
 
     # A planilha tem um número fixo de linhas (o "tamanho da grade"). Se a
     # linha nova ultrapassar esse limite, adiciona mais linhas em branco
@@ -228,6 +238,7 @@ def cadastrar_novo_pacote(dados: dict):
         aba.add_rows(numero_linha_nova - aba.row_count + 500)
 
     aba.update(f"A{numero_linha_nova}", [linha], value_input_option="USER_ENTERED")
+    _herdar_formulas_da_linha_anterior(aba, numero_linha_nova)
 
 
 def chamar_api_apps_script(acao: str, **kwargs):
