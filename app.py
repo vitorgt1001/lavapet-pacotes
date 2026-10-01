@@ -270,6 +270,61 @@ elif pagina == "➕ Novo Pacote":
         help="Preenchido com a soma das sugestões acima — ajuste se teve desconto ou valor diferente.",
     )
 
+    def _calcular_alocacao(servicos, quantidades, sugestoes, soma_sugerida, valor_pago_total):
+        """
+        Divide o valor total pago entre os serviços da compra, na mesma
+        proporção da sugestão de preço de cada um (ex: se Banho sugeriu
+        R$316 e Tosa sugeriu R$100, de um total de R$400 pagos, Banho
+        "leva" 76% e Tosa 24%). Devolve uma linha de detalhe por serviço —
+        é a mesma conta usada tanto pra mostrar a memória de cálculo na
+        tela quanto pra gravar na planilha, então o que você vê aqui é
+        exatamente o que vai ser salvo.
+        """
+        peso_total = soma_sugerida if soma_sugerida > 0 else sum(quantidades.values())
+        linhas = []
+        for servico in servicos:
+            qtd = int(quantidades[servico])
+            preco_avulso = catalogo.preco_sugerido(condominio, servico, porte) or 0
+            preco_c_desconto = catalogo.preco_sugerido_pacote(condominio, servico, porte) or 0
+            if soma_sugerida > 0:
+                peso = sugestoes[servico] / peso_total
+            else:
+                peso = (qtd / peso_total) if peso_total else 0
+            valor_pago_servico = round(valor_pago_total * peso, 2)
+            valor_unitario = round(valor_pago_servico / qtd, 2) if qtd else 0
+            linhas.append({
+                "Serviço": servico,
+                "Qtd": qtd,
+                "Preço avulso (un.)": preco_avulso,
+                "Preço c/ desconto (un.)": preco_c_desconto,
+                "% do total pago": round(peso * 100, 1),
+                "Valor pago (alocado)": valor_pago_servico,
+                "Valor unitário final": valor_unitario,
+            })
+        return linhas
+
+    alocacao = (
+        _calcular_alocacao(servicos_escolhidos, quantidades, sugestoes, soma_sugerida, valor_pago_total)
+        if servicos_escolhidos
+        else []
+    )
+
+    if alocacao:
+        st.caption("📋 Memória de cálculo — é isso que vai ser gravado na planilha:")
+        df_memoria = pd.DataFrame(alocacao)
+        st.dataframe(
+            df_memoria.style.format({
+                "Preço avulso (un.)": "R$ {:.2f}",
+                "Preço c/ desconto (un.)": "R$ {:.2f}",
+                "% do total pago": "{:.1f}%",
+                "Valor pago (alocado)": "R$ {:.2f}",
+                "Valor unitário final": "R$ {:.2f}",
+            }),
+            use_container_width=True,
+            hide_index=True,
+        )
+        st.caption(f"Total pago: R$ {sum(l['Valor pago (alocado)'] for l in alocacao):.2f}")
+
     enviar = st.button("Cadastrar pacote", type="primary")
 
     if enviar:
@@ -285,21 +340,11 @@ elif pagina == "➕ Novo Pacote":
                 # em vez de 2.
                 id_pedido = f"PED-{dt.datetime.now():%Y%m%d%H%M%S}"
 
-                # O valor pago total é dividido entre os serviços na mesma
-                # proporção da sugestão de preço de cada um (ex: se Banho
-                # sugeriu R$316 e Tosa sugeriu R$100, de um total de R$400
-                # pagos, Banho "leva" 76% e Tosa 24%). Isso faz o Saldo em
-                # valor de cada serviço ficar coerente, em vez de jogar tudo
-                # numa linha só e deixar as outras zeradas.
-                peso_total = soma_sugerida if soma_sugerida > 0 else sum(quantidades.values())
-                for servico in servicos_escolhidos:
-                    qtd = int(quantidades[servico])
-                    if soma_sugerida > 0:
-                        peso = sugestoes[servico] / peso_total
-                    else:
-                        peso = qtd / peso_total
-                    valor_pago_servico = round(valor_pago_total * peso, 2)
-                    valor_unitario = round(valor_pago_servico / qtd, 2) if qtd else 0
+                for linha in alocacao:
+                    servico = linha["Serviço"]
+                    qtd = linha["Qtd"]
+                    valor_pago_servico = linha["Valor pago (alocado)"]
+                    valor_unitario = linha["Valor unitário final"]
                     sheets.cadastrar_novo_pacote({
                         "Nome": nome,
                         "Telefone": telefone,
