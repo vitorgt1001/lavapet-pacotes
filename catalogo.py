@@ -84,7 +84,7 @@ PRECOS_REFERENCIA = {
 
 
 def preco_sugerido(condominio, servico, porte):
-    """Retorna o preço de referência (float) ou None se não achar."""
+    """Retorna o preço de referência AVULSO (visita única), ou None se não achar."""
     tabela = PRECOS_REFERENCIA.get(condominio, {})
     valor = tabela.get(servico)
     if valor is None:
@@ -92,3 +92,20 @@ def preco_sugerido(condominio, servico, porte):
     if isinstance(valor, dict):
         return valor.get(porte)
     return valor
+
+
+# Quando o serviço é vendido DENTRO de um pacote (várias visitas compradas
+# de uma vez), o preço por visita sai com desconto em relação ao preço
+# avulso (visita única) acima — o mesmo desconto de 10% que já está
+# embutido na fórmula de "Saldo em valor" da planilha (coluna com
+# L*F*0,9-I). Usamos esse mesmo fator aqui pra sugerir um valor de pacote
+# coerente com o que a planilha já calcula sozinha.
+DESCONTO_PACOTE = 0.90
+
+
+def preco_sugerido_pacote(condominio, servico, porte):
+    """Preço de referência POR VISITA dentro de um pacote (já com o desconto de pacote aplicado)."""
+    preco_avulso = preco_sugerido(condominio, servico, porte)
+    if preco_avulso is None:
+        return None
+    return round(preco_avulso * DESCONTO_PACOTE, 2)
