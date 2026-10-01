@@ -171,11 +171,63 @@ elif pagina == "➕ Novo Pacote":
     # serviços marcados no multiselect muda a quantidade de campos de
     # quantidade que aparecem na tela (um por serviço), e isso só atualiza
     # na hora se o campo não estiver dentro de um st.form.
+
+    @st.cache_data(ttl=60)
+    def _buscar_cliente_por_telefone(digitos: str):
+        """
+        Procura esse telefone nos pacotes já cadastrados e devolve o nome
+        e condomínio da última compra encontrada — pra não ter que digitar
+        os dados do cliente de novo toda vez que ele compra outro pacote.
+        Guarda o resultado por 60s (cache) pra não ficar lendo a planilha
+        a cada letra digitada.
+        """
+        try:
+            df = sheets.ler_pacotes_df()
+        except Exception:
+            return None
+        col_telefone = next((c for c in df.columns if "telefone" in c.lower()), None)
+        col_nome = next((c for c in df.columns if c.lower().strip() == "nome"), None)
+        col_condominio = next((c for c in df.columns if "condom" in c.lower()), None)
+        if not col_telefone or not col_nome:
+            return None
+        digitos_coluna = df[col_telefone].astype(str).str.replace(r"\D", "", regex=True)
+        encontrados = df[digitos_coluna == digitos]
+        if encontrados.empty:
+            return None
+        ultima = encontrados.iloc[-1]
+        return {
+            "nome": str(ultima.get(col_nome, "")).strip(),
+            "condominio": str(ultima.get(col_condominio, "")).strip() if col_condominio else "",
+        }
+
+    telefone = st.text_input(
+        "Telefone do cliente (com DDD)", placeholder="11999999999", key="np_telefone"
+    )
+    digitos_tel = "".join(ch for ch in telefone if ch.isdigit())
+    cliente_existente = _buscar_cliente_por_telefone(digitos_tel) if len(digitos_tel) >= 8 else None
+
+    # Só preenche nome/condomínio sozinho na PRIMEIRA vez que reconhece
+    # esse telefone — depois disso, se você editar o nome ou o condomínio
+    # na mão, o app não fica sobrescrevendo de novo a cada tecla.
+    if cliente_existente and st.session_state.get("_np_tel_autofill") != digitos_tel:
+        st.session_state["np_nome"] = cliente_existente["nome"]
+        if cliente_existente["condominio"] in catalogo.CONDOMINIOS:
+            st.session_state["np_condominio"] = cliente_existente["condominio"]
+        st.session_state["_np_tel_autofill"] = digitos_tel
+
+    if cliente_existente:
+        extra = f" — {cliente_existente['condominio']}" if cliente_existente["condominio"] else ""
+        st.success(
+            f"Cliente já cadastrado: **{cliente_existente['nome']}**{extra} "
+            "(preenchi nome e condomínio abaixo, pode ajustar se precisar)."
+        )
+    elif len(digitos_tel) >= 8:
+        st.caption("Não achei esse telefone em pacotes anteriores — cliente novo.")
+
     c1, c2 = st.columns(2)
     with c1:
-        nome = st.text_input("Nome do cliente")
-        telefone = st.text_input("Telefone (com DDD)", placeholder="11999999999")
-        condominio = st.selectbox("Condomínio", catalogo.CONDOMINIOS)
+        nome = st.text_input("Nome do cliente", key="np_nome")
+        condominio = st.selectbox("Condomínio", catalogo.CONDOMINIOS, key="np_condominio")
     with c2:
         porte = st.selectbox("Porte (referência, pra sugestão de preço)", catalogo.PORTES)
         data_compra = st.date_input("Data da compra", value=dt.date.today())
@@ -198,9 +250,13 @@ elif pagina == "➕ Novo Pacote":
                 quantidades[servico] = col.number_input(
                     servico, min_value=1, step=1, value=4, key=f"qtd_{servico}"
                 )
-                sugestao_unit = catalogo.preco_sugerido(condominio, servico, porte) or 0
-                sugestoes[servico] = sugestao_unit * quantidades[servico]
-                col.caption(f"Sugestão: R$ {sugestoes[servico]:.2f}")
+                # Sugestão já com os 10% de desconto de pacote (preço
+                # avulso só pra visita única — comprando o pacote fechado
+                # sai mais barato por visita, igual já é calculado na
+                # planilha).
+                sugestao_unit = catalogo.preco_sugerido_pacote(condominio, servico, porte) or 0
+                sugestoes[servico] = round(sugestao_unit * quantidades[servico], 2)
+                col.caption(f"Sugestão (c/ 10% de pacote): R$ {sugestoes[servico]:.2f}")
     else:
         st.info("Marca pelo menos um serviço acima.")
 
