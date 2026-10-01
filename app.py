@@ -161,98 +161,109 @@ if pagina == "📊 Painel de Pacotes":
 elif pagina == "➕ Novo Pacote":
     st.header("➕ Cadastrar Pacote Novo")
     st.caption(
-        "Escreve direto na planilha (aba Pacotes_Clientes). Se a compra incluir mais de um "
-        "serviço (ex: banho + dente + tosa junto), marca todos abaixo — cada um vira uma linha "
-        "na planilha, mas todas ficam ligadas pelo mesmo \"ID do Pedido\", contando como 1 pacote só "
-        "no Painel."
+        "Uma compra pode juntar mais de um serviço (ex: Banho + Tosa Higiênica "
+        "no mesmo pedido). Marca abaixo tudo que fez parte dessa compra — cada "
+        "serviço vira uma linha na planilha, mas todas ficam ligadas pelo mesmo "
+        "ID do Pedido, e o Painel conta a compra toda como 1 pacote só."
     )
 
+    # Os campos abaixo ficam FORA de um st.form de propósito: a lista de
+    # serviços marcados no multiselect muda a quantidade de campos de
+    # quantidade que aparecem na tela (um por serviço), e isso só atualiza
+    # na hora se o campo não estiver dentro de um st.form.
     c1, c2 = st.columns(2)
     with c1:
         nome = st.text_input("Nome do cliente")
         telefone = st.text_input("Telefone (com DDD)", placeholder="11999999999")
         condominio = st.selectbox("Condomínio", catalogo.CONDOMINIOS)
     with c2:
-        servicos_selecionados = st.multiselect(
-            "Serviço(s) incluídos nessa compra", catalogo.SERVICOS, default=["Banho"]
-        )
-        porte = st.selectbox("Porte (referência, usado pro preço do Banho)", catalogo.PORTES)
+        porte = st.selectbox("Porte (referência, pra sugestão de preço)", catalogo.PORTES)
         data_compra = st.date_input("Data da compra", value=dt.date.today())
 
-    st.divider()
-    st.caption("Quantidade comprada de cada serviço (normalmente é igual pra todos — ajuste se for diferente, ex: só 1 tosa):")
+    servicos_escolhidos = st.multiselect(
+        "Quais serviços fazem parte dessa compra?",
+        catalogo.SERVICOS,
+        default=["Banho"],
+    )
 
-    qtd_padrao = st.number_input("Quantidade padrão", min_value=1, step=1, value=4)
+    st.divider()
 
     quantidades = {}
-    if servicos_selecionados:
-        colunas_qtd = st.columns(len(servicos_selecionados))
-        for col, servico in zip(colunas_qtd, servicos_selecionados):
+    sugestoes = {}
+    if servicos_escolhidos:
+        st.caption("Quantidade comprada de cada serviço:")
+        colunas = st.columns(len(servicos_escolhidos))
+        for col, servico in zip(colunas, servicos_escolhidos):
             with col:
                 quantidades[servico] = col.number_input(
-                    servico, min_value=0, step=1, value=int(qtd_padrao), key=f"qtd_{servico}"
+                    servico, min_value=1, step=1, value=4, key=f"qtd_{servico}"
                 )
+                sugestao_unit = catalogo.preco_sugerido(condominio, servico, porte) or 0
+                sugestoes[servico] = sugestao_unit * quantidades[servico]
+                col.caption(f"Sugestão: R$ {sugestoes[servico]:.2f}")
+    else:
+        st.info("Marca pelo menos um serviço acima.")
 
-    soma_sugestao = sum(
-        (catalogo.preco_sugerido(condominio, s, porte) or 0) * quantidades.get(s, 0)
-        for s in servicos_selecionados
-    )
-    valor_pago = st.number_input(
-        "Valor total pago (R$) — a soma de tudo que o cliente pagou nessa compra",
+    soma_sugerida = sum(sugestoes.values()) if sugestoes else 0.0
+
+    valor_pago_total = st.number_input(
+        "Valor total pago nessa compra (R$)",
         min_value=0.0,
         step=1.0,
-        value=float(soma_sugestao) if soma_sugestao else 0.0,
-        help="Preenchido com sugestão baseada na tabela de preços — ajuste se teve desconto.",
+        value=float(soma_sugerida),
+        help="Preenchido com a soma das sugestões acima — ajuste se teve desconto ou valor diferente.",
     )
 
-    enviar = st.button("Cadastrar pacote")
+    enviar = st.button("Cadastrar pacote", type="primary")
 
     if enviar:
         if not nome or not telefone:
             st.warning("Preencha pelo menos nome e telefone.")
-        elif not servicos_selecionados:
-            st.warning("Marca pelo menos 1 serviço.")
+        elif not servicos_escolhidos:
+            st.warning("Marca pelo menos um serviço.")
         else:
-            servicos_validos = [s for s in servicos_selecionados if quantidades.get(s, 0) > 0]
-            if not servicos_validos:
-                st.warning("A quantidade de todos os serviços marcados está em 0.")
-            else:
+            try:
+                # Todo pacote ganha um "ID do Pedido" compartilhado entre os
+                # serviços dessa mesma compra — é isso que deixa o Painel
+                # contar "Banho + Tosa comprados juntos" como 1 pacote só,
+                # em vez de 2.
                 id_pedido = f"PED-{dt.datetime.now():%Y%m%d%H%M%S}"
-                erros = []
-                cadastrados = []
-                for i, servico in enumerate(servicos_validos):
-                    qtd = int(quantidades[servico])
-                    # o valor pago (total da compra) fica só na primeira linha do
-                    # pedido, pra não contar o mesmo dinheiro várias vezes se
-                    # alguém somar a coluna Valor Pago depois.
-                    valor_pago_linha = valor_pago if i == 0 else 0
-                    valor_unitario = round(valor_pago_linha / qtd, 2) if (i == 0 and qtd) else 0
-                    try:
-                        sheets.cadastrar_novo_pacote({
-                            "Nome": nome,
-                            "Telefone": telefone,
-                            "Condomínio": condominio,
-                            "Serviço": servico,
-                            "Qtd Comprada": qtd,
-                            "Qtd Usada": 0,
-                            "Valor Pago": valor_pago_linha,
-                            "Valor Unitário": valor_unitario,
-                            "Data Compra": data_compra.strftime("%Y-%m-%d"),
-                            "ID do Pedido": id_pedido,
-                        })
-                        cadastrados.append(f"{qtd}x {servico}")
-                    except Exception as e:
-                        erros.append(f"{servico}: {e}")
 
-                if cadastrados:
-                    st.success(f"Pacote de {nome} cadastrado! ({' + '.join(cadastrados)} — {condominio}). ID do Pedido: {id_pedido}")
-                if erros:
-                    for msg in erros:
-                        formatar_erro(Exception(msg))
-                    st.info(
-                        "Se o erro falar de coluna não encontrada, o nome do cabeçalho na planilha "
-                        "é diferente do que o app está tentando usar — me chama que eu ajusto."
-                    )
+                # O valor pago total é dividido entre os serviços na mesma
+                # proporção da sugestão de preço de cada um (ex: se Banho
+                # sugeriu R$316 e Tosa sugeriu R$100, de um total de R$400
+                # pagos, Banho "leva" 76% e Tosa 24%). Isso faz o Saldo em
+                # valor de cada serviço ficar coerente, em vez de jogar tudo
+                # numa linha só e deixar as outras zeradas.
+                peso_total = soma_sugerida if soma_sugerida > 0 else sum(quantidades.values())
+                for servico in servicos_escolhidos:
+                    qtd = int(quantidades[servico])
+                    if soma_sugerida > 0:
+                        peso = sugestoes[servico] / peso_total
+                    else:
+                        peso = qtd / peso_total
+                    valor_pago_servico = round(valor_pago_total * peso, 2)
+                    valor_unitario = round(valor_pago_servico / qtd, 2) if qtd else 0
+                    sheets.cadastrar_novo_pacote({
+                        "Nome": nome,
+                        "Telefone": telefone,
+                        "Condomínio": condominio,
+                        "Serviço": servico,
+                        "Qtd Comprada": qtd,
+                        "Qtd Usada": 0,
+                        "Valor Pago": valor_pago_servico,
+                        "Valor Unitário": valor_unitario,
+                        "Data Compra": data_compra.strftime("%Y-%m-%d"),
+                        "ID do Pedido": id_pedido,
+                    })
+                resumo = ", ".join(f"{int(quantidades[s])}x {s}" for s in servicos_escolhidos)
+                st.success(f"Pacote de {nome} cadastrado! ({resumo} — {condominio})")
+            except Exception as e:
+                formatar_erro(e)
+                st.info(
+                    "Se o erro falar de coluna não encontrada, o nome do cabeçalho na planilha "
+                    "é diferente do que o app está tentando usar — me chama que eu ajusto."
+                )
 
 
 # ------------------------------------------------------------
