@@ -200,10 +200,14 @@ elif pagina == "➕ Novo Pacote":
             "condominio": str(ultima.get(col_condominio, "")).strip() if col_condominio else "",
         }
 
-    telefone = st.text_input(
-        "Telefone do cliente (com DDD)", placeholder="11999999999", key="np_telefone"
-    )
-    digitos_tel = "".join(ch for ch in telefone if ch.isdigit())
+    # Lê o telefone já digitado (se houver) ANTES de desenhar os campos na
+    # tela — assim dá pra fazer a busca e preparar o auto-preenchimento do
+    # Nome sem precisar colocar o campo Telefone antes do campo Nome (o
+    # campo Nome volta a aparecer PRIMEIRO, do jeito que você já tava
+    # acostumado — só trocar a ordem na tela da última vez claramente
+    # confundiu e fez telefone e nome serem digitados no campo errado).
+    telefone_digitado = st.session_state.get("np_telefone", "")
+    digitos_tel = "".join(ch for ch in telefone_digitado if ch.isdigit())
     cliente_existente = _buscar_cliente_por_telefone(digitos_tel) if len(digitos_tel) >= 8 else None
 
     # Só preenche nome/condomínio sozinho na PRIMEIRA vez que reconhece
@@ -215,22 +219,25 @@ elif pagina == "➕ Novo Pacote":
             st.session_state["np_condominio"] = cliente_existente["condominio"]
         st.session_state["_np_tel_autofill"] = digitos_tel
 
-    if cliente_existente:
-        extra = f" — {cliente_existente['condominio']}" if cliente_existente["condominio"] else ""
-        st.success(
-            f"Cliente já cadastrado: **{cliente_existente['nome']}**{extra} "
-            "(preenchi nome e condomínio abaixo, pode ajustar se precisar)."
-        )
-    elif len(digitos_tel) >= 8:
-        st.caption("Não achei esse telefone em pacotes anteriores — cliente novo.")
-
     c1, c2 = st.columns(2)
     with c1:
         nome = st.text_input("Nome do cliente", key="np_nome")
+        telefone = st.text_input(
+            "Telefone (com DDD)", placeholder="11999999999", key="np_telefone"
+        )
         condominio = st.selectbox("Condomínio", catalogo.CONDOMINIOS, key="np_condominio")
     with c2:
         porte = st.selectbox("Porte (referência, pra sugestão de preço)", catalogo.PORTES)
         data_compra = st.date_input("Data da compra", value=dt.date.today())
+
+    if cliente_existente:
+        extra = f" — {cliente_existente['condominio']}" if cliente_existente["condominio"] else ""
+        st.success(
+            f"Cliente já cadastrado: **{cliente_existente['nome']}**{extra} "
+            "(preenchi nome e condomínio acima, pode ajustar se precisar)."
+        )
+    elif len(digitos_tel) >= 8:
+        st.caption("Não achei esse telefone em pacotes anteriores — cliente novo.")
 
     servicos_escolhidos = st.multiselect(
         "Quais serviços fazem parte dessa compra?",
@@ -328,8 +335,22 @@ elif pagina == "➕ Novo Pacote":
     enviar = st.button("Cadastrar pacote", type="primary")
 
     if enviar:
+        digitos_tel_final = "".join(ch for ch in telefone if ch.isdigit())
+        # Trava de segurança pra pegar nome/telefone trocados de campo antes
+        # de gravar na planilha (já aconteceu um teste onde isso foi
+        # digitado no campo errado e foi direto pra planilha sem avisar).
         if not nome or not telefone:
             st.warning("Preencha pelo menos nome e telefone.")
+        elif len(digitos_tel_final) < 10 or len(digitos_tel_final) > 11:
+            st.warning(
+                f"O telefone \"{telefone}\" não parece certo (achei {len(digitos_tel_final)} "
+                "número(s), o esperado é 10 ou 11 com DDD). Confere se não trocou com o campo Nome."
+            )
+        elif nome.strip().replace(" ", "").isdigit():
+            st.warning(
+                f"O campo Nome está só com números (\"{nome}\") — confere se não trocou com o "
+                "campo Telefone."
+            )
         elif not servicos_escolhidos:
             st.warning("Marca pelo menos um serviço.")
         else:
