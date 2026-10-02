@@ -213,8 +213,16 @@ elif pagina == "➕ Novo Pacote":
     # Só preenche nome/condomínio sozinho na PRIMEIRA vez que reconhece
     # esse telefone — depois disso, se você editar o nome ou o condomínio
     # na mão, o app não fica sobrescrevendo de novo a cada tecla.
+    #
+    # IMPORTANTE: só sobrescreve o Nome se o cadastro antigo encontrado TEM
+    # um nome preenchido. Sem isso, se esse telefone já tiver uma linha
+    # antiga na planilha com o Nome em branco (ex: linha de teste), o app
+    # apagava sozinho o nome que você tinha acabado de digitar, assim que
+    # terminava de digitar o telefone — por isso às vezes parecia que
+    # "sumia" o nome mesmo com o campo visualmente preenchido antes.
     if cliente_existente and st.session_state.get("_np_tel_autofill") != digitos_tel:
-        st.session_state["np_nome"] = cliente_existente["nome"]
+        if cliente_existente["nome"]:
+            st.session_state["np_nome"] = cliente_existente["nome"]
         if cliente_existente["condominio"] in catalogo.CONDOMINIOS:
             st.session_state["np_condominio"] = cliente_existente["condominio"]
         st.session_state["_np_tel_autofill"] = digitos_tel
@@ -340,7 +348,12 @@ elif pagina == "➕ Novo Pacote":
         # de gravar na planilha (já aconteceu um teste onde isso foi
         # digitado no campo errado e foi direto pra planilha sem avisar).
         if not nome or not telefone:
-            st.warning("Preencha pelo menos nome e telefone.")
+            st.warning(
+                "Preencha pelo menos nome e telefone. "
+                f"(O que o app recebeu: nome=\"{nome}\", telefone=\"{telefone}\" — "
+                "se algum dos dois tiver vindo vazio mesmo você tendo digitado, me manda "
+                "um print desse aviso, que agora ele mostra o que o app enxergou.)"
+            )
         elif len(digitos_tel_final) < 10 or len(digitos_tel_final) > 11:
             st.warning(
                 f"O telefone \"{telefone}\" não parece certo (achei {len(digitos_tel_final)} "
