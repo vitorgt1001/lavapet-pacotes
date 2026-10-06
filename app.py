@@ -351,10 +351,9 @@ elif pagina == "➕ Novo Pacote":
         # digitado no campo errado e foi direto pra planilha sem avisar).
         if not nome or not telefone:
             st.warning(
-                "Preencha pelo menos nome e telefone. "
-                f"(O que o app recebeu: nome=\"{nome}\", telefone=\"{telefone}\" — "
-                "se algum dos dois tiver vindo vazio mesmo você tendo digitado, me manda "
-                "um print desse aviso, que agora ele mostra o que o app enxergou.)"
+                "Preencha pelo menos nome e telefone. Se usou o preenchimento automático "
+                "do navegador, clica dentro do campo e digita algo (ou apaga e digita de "
+                "novo) antes de cadastrar."
             )
         elif len(digitos_tel_final) < 10 or len(digitos_tel_final) > 11:
             st.warning(
