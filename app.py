@@ -7,6 +7,7 @@ Pra rodar:  streamlit run app.py
 
 import datetime as dt
 import os
+import time
 
 import pandas as pd
 import streamlit as st
@@ -59,6 +60,35 @@ st.sidebar.caption("Controle de pacotes — versão simples, feita com Streamlit
 
 def formatar_erro(e: Exception):
     st.error(f"Deu erro: {e}")
+
+
+@st.cache_data(ttl=60)
+def _buscar_cliente_por_telefone(digitos: str):
+    """
+    Procura esse telefone nos pacotes já cadastrados e devolve o nome e
+    condomínio da última compra encontrada — usado tanto em "Novo Pacote"
+    (pra não digitar os dados do cliente de novo) quanto em "Registrar
+    Atendimento" (pra preencher o Condomínio sozinho). Guarda o resultado
+    por 60s (cache) pra não ficar lendo a planilha a cada letra digitada.
+    """
+    try:
+        df = sheets.ler_pacotes_df()
+    except Exception:
+        return None
+    col_telefone = next((c for c in df.columns if "telefone" in c.lower()), None)
+    col_nome = next((c for c in df.columns if c.lower().strip() == "nome"), None)
+    col_condominio = next((c for c in df.columns if "condom" in c.lower()), None)
+    if not col_telefone or not col_nome:
+        return None
+    digitos_coluna = df[col_telefone].astype(str).str.replace(r"\D", "", regex=True)
+    encontrados = df[digitos_coluna == digitos]
+    if encontrados.empty:
+        return None
+    ultima = encontrados.iloc[-1]
+    return {
+        "nome": str(ultima.get(col_nome, "")).strip(),
+        "condominio": str(ultima.get(col_condominio, "")).strip() if col_condominio else "",
+    }
 
 
 # ------------------------------------------------------------
@@ -171,34 +201,6 @@ elif pagina == "➕ Novo Pacote":
     # serviços marcados no multiselect muda a quantidade de campos de
     # quantidade que aparecem na tela (um por serviço), e isso só atualiza
     # na hora se o campo não estiver dentro de um st.form.
-
-    @st.cache_data(ttl=60)
-    def _buscar_cliente_por_telefone(digitos: str):
-        """
-        Procura esse telefone nos pacotes já cadastrados e devolve o nome
-        e condomínio da última compra encontrada — pra não ter que digitar
-        os dados do cliente de novo toda vez que ele compra outro pacote.
-        Guarda o resultado por 60s (cache) pra não ficar lendo a planilha
-        a cada letra digitada.
-        """
-        try:
-            df = sheets.ler_pacotes_df()
-        except Exception:
-            return None
-        col_telefone = next((c for c in df.columns if "telefone" in c.lower()), None)
-        col_nome = next((c for c in df.columns if c.lower().strip() == "nome"), None)
-        col_condominio = next((c for c in df.columns if "condom" in c.lower()), None)
-        if not col_telefone or not col_nome:
-            return None
-        digitos_coluna = df[col_telefone].astype(str).str.replace(r"\D", "", regex=True)
-        encontrados = df[digitos_coluna == digitos]
-        if encontrados.empty:
-            return None
-        ultima = encontrados.iloc[-1]
-        return {
-            "nome": str(ultima.get(col_nome, "")).strip(),
-            "condominio": str(ultima.get(col_condominio, "")).strip() if col_condominio else "",
-        }
 
     # Lê o telefone já digitado (se houver) ANTES de desenhar os campos na
     # tela — assim dá pra fazer a busca e preparar o auto-preenchimento do
@@ -411,38 +413,107 @@ elif pagina == "✅ Registrar Atendimento":
         "(só atualiza o histórico) — igual ao comportamento da planilha hoje."
     )
 
-    with st.form("form_atendimento"):
-        c1, c2 = st.columns(2)
-        with c1:
-            telefone = st.text_input("Telefone do cliente (com DDD)", placeholder="11999999999")
-            servico = st.selectbox("Serviço utilizado", catalogo.SERVICOS)
-        with c2:
-            condominio = st.selectbox("Condomínio (opcional, ajuda a desempatar)", [""] + catalogo.CONDOMINIOS)
-            retroativo = st.checkbox("Lançamento retroativo (reconciliação)")
+    # Mensagem de sucesso do envio anterior (guardada antes de limpar a tela
+    # — ver comentário mais abaixo, no bloco "if enviar").
+    if st.session_state.get("_ra_sucesso_msg"):
+        st.success(st.session_state.pop("_ra_sucesso_msg"))
 
-        data_reconciliacao = ""
-        if retroativo:
-            data_reconciliacao = st.date_input("Data em que o atendimento realmente aconteceu").strftime("%Y-%m-%d")
+    # Fora de st.form de propósito (igual na página "Novo Pacote"): dentro
+    # de um st.form, NENHUM campo atualiza a tela até você clicar no botão
+    # final — então o Condomínio nunca preenchia sozinho, e a caixinha de
+    # data retroativa só "aparecia" no exato instante em que você clicava
+    # em Registrar, tarde demais pra você escolher a data certa (ela usava
+    # a data de hoje sem avisar). Tirando do form, os dois já atualizam na
+    # hora.
+    telefone_digitado = st.session_state.get("ra_telefone", "")
+    digitos_tel = "".join(ch for ch in telefone_digitado if ch.isdigit())
+    cliente_existente = _buscar_cliente_por_telefone(digitos_tel) if len(digitos_tel) >= 8 else None
 
-        enviar = st.form_submit_button("Registrar atendimento")
+    if cliente_existente and st.session_state.get("_ra_tel_autofill") != digitos_tel:
+        if cliente_existente["condominio"] in catalogo.CONDOMINIOS:
+            st.session_state["ra_condominio"] = cliente_existente["condominio"]
+        st.session_state["_ra_tel_autofill"] = digitos_tel
+
+    c1, c2 = st.columns(2)
+    with c1:
+        telefone = st.text_input(
+            "Telefone do cliente (com DDD)", placeholder="11999999999", key="ra_telefone"
+        )
+        servico = st.selectbox("Serviço utilizado", catalogo.SERVICOS)
+    with c2:
+        condominio = st.selectbox(
+            "Condomínio (opcional, ajuda a desempatar)", [""] + catalogo.CONDOMINIOS, key="ra_condominio"
+        )
+        retroativo = st.checkbox("Lançamento retroativo (reconciliação)")
+
+    if cliente_existente:
+        extra = f" — {cliente_existente['condominio']}" if cliente_existente["condominio"] else ""
+        st.success(f"Cliente encontrado: **{cliente_existente['nome']}**{extra} (confere se é o mesmo).")
+    elif len(digitos_tel) >= 8:
+        st.caption("Não achei esse telefone em pacotes anteriores.")
+
+    data_reconciliacao = ""
+    if retroativo:
+        data_reconciliacao = st.date_input("Data em que o atendimento realmente aconteceu").strftime("%Y-%m-%d")
+
+    enviar = st.button("Registrar atendimento", type="primary")
 
     if enviar:
         if not telefone:
             st.warning("Preencha o telefone do cliente.")
         else:
-            try:
-                resultado = sheets.registrar_atendimento(
-                    telefone=telefone,
-                    servico=servico,
-                    condominio=condominio,
-                    data_reconciliacao=data_reconciliacao,
+            # Trava contra clique duplo: se clicar duas vezes rápido (ou a
+            # página demorar pra responder e der outro clique por engano),
+            # sem isso o app registrava o MESMO atendimento duas vezes,
+            # descontando 2 do saldo em vez de 1. Só deixa repetir o mesmo
+            # telefone+serviço de novo depois de alguns segundos.
+            assinatura = (digitos_tel, servico, condominio, retroativo, data_reconciliacao)
+            agora_ts = time.time()
+            ultimo = st.session_state.get("_ra_ultimo_envio")
+            if ultimo and ultimo[0] == assinatura and (agora_ts - ultimo[1]) < 8:
+                st.warning(
+                    "Esse mesmo atendimento acabou de ser registrado agora mesmo — não registrei de "
+                    "novo pra não descontar em dobro. Se for outro atendimento de verdade, espera "
+                    "alguns segundos e clica de novo."
                 )
-                if resultado.get("mensagemEnviada"):
-                    st.success(f"Atendimento registrado! Saldo restante: {resultado.get('saldoRestante')}. WhatsApp enviado ao cliente.")
-                else:
-                    st.success(f"Atendimento retroativo registrado! Saldo restante: {resultado.get('saldoRestante')}. Nenhuma mensagem foi enviada.")
-            except Exception as e:
-                formatar_erro(e)
+            else:
+                st.session_state["_ra_ultimo_envio"] = (assinatura, agora_ts)
+                try:
+                    resultado = sheets.registrar_atendimento(
+                        telefone=telefone,
+                        servico=servico,
+                        condominio=condominio,
+                        data_reconciliacao=data_reconciliacao,
+                    )
+                    if resultado.get("mensagemEnviada"):
+                        msg = (
+                            f"Atendimento registrado! Saldo restante: {resultado.get('saldoRestante')}. "
+                            "WhatsApp enviado ao cliente."
+                        )
+                    else:
+                        msg = (
+                            f"Atendimento retroativo registrado! Saldo restante: {resultado.get('saldoRestante')}. "
+                            "Nenhuma mensagem foi enviada."
+                        )
+                    # Guarda a mensagem de sucesso pra mostrar DEPOIS de limpar a
+                    # tela (ela é lida lá em cima, no início da página, na
+                    # próxima vez que a tela desenhar) e limpa os campos —
+                    # assim a tela já fica em branco, pronta pro próximo
+                    # atendimento, em vez de ficar com o telefone anterior.
+                    st.session_state["_ra_sucesso_msg"] = msg
+                    st.session_state["ra_telefone"] = ""
+                    st.session_state["ra_condominio"] = ""
+                    st.session_state.pop("_ra_tel_autofill", None)
+                    st.rerun()
+                except Exception as e:
+                    mensagem_erro = str(e).lower()
+                    if "saldo" in mensagem_erro and ("dispon" in mensagem_erro or "zerad" in mensagem_erro or "nenhum pacote" in mensagem_erro):
+                        st.warning(
+                            f"Esse cliente não tem mais saldo disponível para \"{servico}\" nesse "
+                            "pacote. Confere se ele já usou tudo e precisa comprar um pacote novo."
+                        )
+                    else:
+                        formatar_erro(e)
 
 
 # ------------------------------------------------------------
