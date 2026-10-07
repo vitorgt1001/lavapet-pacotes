@@ -417,6 +417,17 @@ elif pagina == "✅ Registrar Atendimento":
     if st.session_state.get("_ra_sucesso_msg"):
         st.success(st.session_state.pop("_ra_sucesso_msg"))
 
+    # Limpa os campos ANTES de criar os widgets (igual o Streamlit exige —
+    # não dá pra mudar st.session_state de um campo DEPOIS que ele já foi
+    # desenhado na tela nessa mesma rodada, só dá erro "cannot be modified
+    # after the widget...". Por isso a limpeza acontece aqui em cima, numa
+    # rodada seguinte, marcada pela flag "_ra_limpar" lá no final do envio).
+    if st.session_state.get("_ra_limpar"):
+        st.session_state["ra_telefone"] = ""
+        st.session_state["ra_condominio"] = ""
+        st.session_state.pop("_ra_tel_autofill", None)
+        st.session_state["_ra_limpar"] = False
+
     # Fora de st.form de propósito (igual na página "Novo Pacote"): dentro
     # de um st.form, NENHUM campo atualiza a tela até você clicar no botão
     # final — então o Condomínio nunca preenchia sozinho, e a caixinha de
@@ -494,15 +505,13 @@ elif pagina == "✅ Registrar Atendimento":
                             f"Atendimento retroativo registrado! Saldo restante: {resultado.get('saldoRestante')}. "
                             "Nenhuma mensagem foi enviada."
                         )
-                    # Guarda a mensagem de sucesso pra mostrar DEPOIS de limpar a
-                    # tela (ela é lida lá em cima, no início da página, na
-                    # próxima vez que a tela desenhar) e limpa os campos —
-                    # assim a tela já fica em branco, pronta pro próximo
-                    # atendimento, em vez de ficar com o telefone anterior.
+                    # Guarda a mensagem de sucesso e só MARCA que precisa limpar
+                    # (a limpeza de verdade acontece lá em cima, no início da
+                    # página, na rodada seguinte — ver comentário lá). Fazer a
+                    # limpeza diretamente aqui dava erro, porque os campos já
+                    # tinham sido desenhados na tela nessa mesma rodada.
                     st.session_state["_ra_sucesso_msg"] = msg
-                    st.session_state["ra_telefone"] = ""
-                    st.session_state["ra_condominio"] = ""
-                    st.session_state.pop("_ra_tel_autofill", None)
+                    st.session_state["_ra_limpar"] = True
                     st.rerun()
                 except Exception as e:
                     mensagem_erro = str(e).lower()
