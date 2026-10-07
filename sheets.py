@@ -264,3 +264,15 @@ def registrar_atendimento(telefone, servico, condominio="", data_reconciliacao="
         condominio=condominio,
         dataReconciliacao=data_reconciliacao,
     )
+
+
+def finalizar_atendimento(telefone):
+    """
+    Dispara AGORA a mensagem de WhatsApp consolidada pro cliente, juntando
+    todos os serviços registrados pra ele desde a última mensagem enviada.
+    Usada pelo botão "Finalizar atendimento e enviar resumo" — em vez de
+    mandar uma mensagem a cada serviço marcado em "Registrar Atendimento",
+    os serviços ficam acumulados (no lado do Apps Script) até você clicar
+    aqui, e aí sai uma mensagem só com tudo que o cliente usou na visita.
+    """
+    return chamar_api_apps_script("finalizar_atendimento", telefone=telefone)
