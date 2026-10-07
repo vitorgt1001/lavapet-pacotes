@@ -408,12 +408,14 @@ elif pagina == "➕ Novo Pacote":
 elif pagina == "✅ Registrar Atendimento":
     st.header("✅ Registrar Atendimento")
     st.caption(
-        "Desconta 1 do saldo do pacote. Se marcar como retroativo, NÃO manda WhatsApp pro cliente "
-        "(só atualiza o histórico) — igual ao comportamento da planilha hoje."
+        "Desconta 1 do saldo do pacote a cada serviço marcado. A mensagem de WhatsApp pro "
+        "cliente NÃO sai a cada item — ela fica \"guardada\" e só é enviada (uma vez só, com "
+        "tudo que foi usado) quando você clicar em \"Finalizar atendimento e enviar resumo\", "
+        "lá embaixo. Lançamento retroativo nunca manda mensagem, igual já era antes."
     )
 
-    # Mensagem de sucesso do envio anterior (guardada antes de limpar a tela
-    # — ver comentário mais abaixo, no bloco "if enviar").
+    # Mensagem de sucesso da ação anterior (guardada antes de limpar a tela
+    # — ver comentário mais abaixo, no bloco "if enviar" / "if finalizar").
     if st.session_state.get("_ra_sucesso_msg"):
         st.success(st.session_state.pop("_ra_sucesso_msg"))
 
@@ -422,6 +424,10 @@ elif pagina == "✅ Registrar Atendimento":
     # desenhado na tela nessa mesma rodada, só dá erro "cannot be modified
     # after the widget...". Por isso a limpeza acontece aqui em cima, numa
     # rodada seguinte, marcada pela flag "_ra_limpar" lá no final do envio).
+    # Só limpamos a tela depois de FINALIZAR o atendimento (ou lançar um
+    # retroativo) — registrar um serviço avulso NÃO limpa mais o telefone,
+    # porque normalmente você vai marcar mais de um serviço seguido pro
+    # mesmo cliente antes de finalizar a visita.
     if st.session_state.get("_ra_limpar"):
         st.session_state["ra_telefone"] = ""
         st.session_state["ra_condominio"] = ""
@@ -466,7 +472,21 @@ elif pagina == "✅ Registrar Atendimento":
     if retroativo:
         data_reconciliacao = st.date_input("Data em que o atendimento realmente aconteceu").strftime("%Y-%m-%d")
 
+    # Lista local (só pra mostrar na tela) dos serviços já marcados nesta
+    # visita, pra você acompanhar o que já foi registrado antes de clicar
+    # em "Finalizar atendimento". É por telefone, porque você pode estar
+    # alternando entre clientes diferentes na mesma sessão do app.
+    pendentes_por_telefone = st.session_state.setdefault("_ra_pendentes", {})
+    pendentes_deste_cliente = pendentes_por_telefone.get(digitos_tel, [])
+
+    if pendentes_deste_cliente:
+        st.info(
+            "📋 Itens registrados nesta visita (ainda **não** enviei a mensagem pro cliente):\n\n"
+            + "\n".join(f"- {s}" for s in pendentes_deste_cliente)
+        )
+
     enviar = st.button("Registrar atendimento", type="primary")
+    finalizar = st.button("✅ Finalizar atendimento e enviar resumo", disabled=not telefone)
 
     if enviar:
         if not telefone:
@@ -496,22 +516,25 @@ elif pagina == "✅ Registrar Atendimento":
                         data_reconciliacao=data_reconciliacao,
                     )
                     if resultado.get("mensagemEnviada"):
+                        # Não manda WhatsApp na hora — só entra na fila do lado do
+                        # Apps Script. Guardamos aqui também, localmente, só pra
+                        # mostrar a lista "itens desta visita" na tela.
+                        pendentes_por_telefone.setdefault(digitos_tel, []).append(servico)
                         msg = (
-                            f"Atendimento registrado! Saldo restante: {resultado.get('saldoRestante')}. "
-                            "WhatsApp enviado ao cliente."
+                            f"Serviço \"{servico}\" registrado! Saldo restante: {resultado.get('saldoRestante')}. "
+                            "Ainda não mandei a mensagem pro cliente — clica em \"Finalizar atendimento\" "
+                            "quando terminar de registrar tudo dessa visita."
                         )
                     else:
                         msg = (
                             f"Atendimento retroativo registrado! Saldo restante: {resultado.get('saldoRestante')}. "
-                            "Nenhuma mensagem foi enviada."
+                            "Nenhuma mensagem foi enviada (retroativo nunca manda)."
                         )
-                    # Guarda a mensagem de sucesso e só MARCA que precisa limpar
-                    # (a limpeza de verdade acontece lá em cima, no início da
-                    # página, na rodada seguinte — ver comentário lá). Fazer a
-                    # limpeza diretamente aqui dava erro, porque os campos já
-                    # tinham sido desenhados na tela nessa mesma rodada.
+                    # Guarda a mensagem de sucesso. NÃO limpa o telefone aqui — só
+                    # ao finalizar o atendimento (ver bloco "if finalizar" abaixo),
+                    # porque o normal é marcar mais de um serviço seguido pro
+                    # mesmo cliente antes de encerrar a visita.
                     st.session_state["_ra_sucesso_msg"] = msg
-                    st.session_state["_ra_limpar"] = True
                     st.rerun()
                 except Exception as e:
                     mensagem_erro = str(e).lower()
@@ -522,6 +545,27 @@ elif pagina == "✅ Registrar Atendimento":
                         )
                     else:
                         formatar_erro(e)
+
+    if finalizar:
+        try:
+            resultado = sheets.finalizar_atendimento(telefone=telefone)
+            if resultado.get("enviado"):
+                servicos_enviados = resultado.get("servicos") or pendentes_deste_cliente
+                msg = (
+                    f"Resumo enviado pro cliente! Serviços dessa visita: "
+                    + ", ".join(servicos_enviados) + "."
+                )
+            else:
+                msg = (
+                    "Não tinha nenhum serviço pendente pra esse telefone pra mandar "
+                    "(talvez você só tenha feito lançamentos retroativos, ou já tinha finalizado antes)."
+                )
+            pendentes_por_telefone.pop(digitos_tel, None)
+            st.session_state["_ra_sucesso_msg"] = msg
+            st.session_state["_ra_limpar"] = True
+            st.rerun()
+        except Exception as e:
+            formatar_erro(e)
 
 
 # ------------------------------------------------------------
