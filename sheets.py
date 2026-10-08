@@ -276,3 +276,15 @@ def finalizar_atendimento(telefone):
     aqui, e aí sai uma mensagem só com tudo que o cliente usou na visita.
     """
     return chamar_api_apps_script("finalizar_atendimento", telefone=telefone)
+
+
+def cancelar_atendimento_pendente(telefone):
+    """
+    Apaga a fila de serviços pendentes desse telefone (do lado do Apps
+    Script) SEM mandar mensagem nenhuma pro cliente. Usada pelo botão
+    "🧹 Cancelar o que ainda não enviei" — serve pra quando um teste deu
+    errado: sem isso, o que sobrou do teste ficaria "esperando" e se
+    juntaria sozinho com o próximo atendimento de verdade desse mesmo
+    telefone (mesmo depois de você já ter corrigido a planilha na mão).
+    """
+    return chamar_api_apps_script("cancelar_atendimento_pendente", telefone=telefone)
