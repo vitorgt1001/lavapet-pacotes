@@ -497,6 +497,31 @@ elif pagina == "✅ Registrar Atendimento":
     enviar = st.button("Registrar atendimento", type="primary")
     finalizar = st.button("✅ Finalizar atendimento e enviar resumo", disabled=not telefone)
 
+    # Botão de cancelar fica separado e "escondido" de propósito (dentro de
+    # um expander, fechado por padrão, e só liberado depois de marcar a
+    # caixinha de confirmação). Ele faz o oposto do "Finalizar": apaga o
+    # resumo SEM mandar mensagem. Como ficava logo do lado do "Finalizar",
+    # um clique errado ali faria o cliente nunca receber a mensagem do
+    # atendimento de verdade — essa fricção extra é proposital, pra ninguém
+    # apertar por engano.
+    st.divider()
+    cancelar_pendente = False
+    with st.expander("⚠️ Cancelar o que ainda não enviei (só pra corrigir um teste que deu errado)"):
+        st.warning(
+            "Isso apaga o resumo que ia ser enviado pra esse telefone, SEM mandar "
+            "mensagem pro cliente. **Só use isso se foi um teste/erro.** Se o "
+            "atendimento foi de verdade, use o botão \"Finalizar atendimento e "
+            "enviar resumo\" acima, não este."
+        )
+        confirmar_cancelamento = st.checkbox(
+            "Sim, tenho certeza — não é um atendimento de verdade",
+            key="ra_confirma_cancelar",
+        )
+        cancelar_pendente = st.button(
+            "🧹 Cancelar mesmo assim (sem mandar mensagem)",
+            disabled=not telefone or not confirmar_cancelamento,
+        )
+
     if enviar:
         if not telefone:
             st.warning("Preencha o telefone do cliente.")
@@ -569,6 +594,23 @@ elif pagina == "✅ Registrar Atendimento":
                     "Não tinha nenhum serviço pendente pra esse telefone pra mandar "
                     "(talvez você só tenha feito lançamentos retroativos, ou já tinha finalizado antes)."
                 )
+            pendentes_por_telefone.pop(digitos_tel, None)
+            st.session_state["_ra_sucesso_msg"] = msg
+            st.session_state["_ra_limpar"] = True
+            st.rerun()
+        except Exception as e:
+            formatar_erro(e)
+
+    if cancelar_pendente:
+        try:
+            resultado = sheets.cancelar_atendimento_pendente(telefone=telefone)
+            if resultado.get("cancelado"):
+                msg = (
+                    "Cancelado! Apaguei o que tava esperando pra esse telefone "
+                    "(não mandei nenhuma mensagem pro cliente)."
+                )
+            else:
+                msg = "Não tinha nada esperando pra esse telefone — nada pra cancelar."
             pendentes_por_telefone.pop(digitos_tel, None)
             st.session_state["_ra_sucesso_msg"] = msg
             st.session_state["_ra_limpar"] = True
