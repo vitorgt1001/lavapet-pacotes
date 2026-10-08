@@ -484,6 +484,15 @@ elif pagina == "✅ Registrar Atendimento":
             "📋 Itens registrados nesta visita (ainda **não** enviei a mensagem pro cliente):\n\n"
             + "\n".join(f"- {s}" for s in pendentes_deste_cliente)
         )
+        # Essa lista é só uma "nota" guardada aqui na tela do navegador —
+        # ela NÃO lê a planilha nem o que está guardado do lado do Apps
+        # Script. Se você editar a planilha na mão (apagar/corrigir linhas
+        # de teste, por exemplo), essa lista aqui não sabe disso e continua
+        # mostrando o que tinha antes. Esse botão só limpa essa nota na
+        # tela — não apaga nem desfaz nada na planilha nem no WhatsApp.
+        if st.button("🗑️ Limpar essa lista (só a nota na tela, não afeta a planilha)"):
+            pendentes_por_telefone.pop(digitos_tel, None)
+            st.rerun()
 
     enviar = st.button("Registrar atendimento", type="primary")
     finalizar = st.button("✅ Finalizar atendimento e enviar resumo", disabled=not telefone)
