@@ -544,28 +544,34 @@ elif pagina == "✅ Registrar Atendimento":
     pendentes_deste_cliente = pendentes_por_telefone.get(digitos_tel, [])
 
     if pendentes_deste_cliente:
-        st.info(
-            "📋 Itens marcados nesta visita (ainda **não** gravei na planilha nem mandei "
-            "mensagem):\n\n"
-            + "\n".join(f"{i + 1}. {s}" for i, s in enumerate(pendentes_deste_cliente))
-        )
-        col_remover_sel, col_remover_botao = st.columns([2, 1])
-        with col_remover_sel:
-            indice_remover = st.selectbox(
-                "Marcou algo errado? Escolhe o item pra remover da lista",
-                options=list(range(len(pendentes_deste_cliente))),
-                format_func=lambda i: f"{i + 1}. {pendentes_deste_cliente[i]}",
-                key="ra_remover_indice",
-                label_visibility="visible",
+        # Lista e "remover item" ficam dentro do MESMO quadro (container com
+        # borda), pra ficar visualmente claro que uma coisa pertence à
+        # outra — antes a lista tinha caixinha azul (st.info) e o "remover"
+        # ficava solto embaixo, sem parecer parte do mesmo bloco.
+        with st.container(border=True):
+            st.markdown(
+                "📋 **Itens marcados nesta visita** (ainda **não** gravei na planilha nem "
+                "mandei mensagem):"
             )
-        with col_remover_botao:
-            st.write("")
-            st.write("")
-            if st.button("Remover esse item"):
-                pendentes_deste_cliente.pop(indice_remover)
-                if not pendentes_deste_cliente:
-                    pendentes_por_telefone.pop(digitos_tel, None)
-                st.rerun()
+            st.markdown("\n".join(f"{i + 1}. {s}" for i, s in enumerate(pendentes_deste_cliente)))
+            st.divider()
+            col_remover_sel, col_remover_botao = st.columns([2, 1])
+            with col_remover_sel:
+                indice_remover = st.selectbox(
+                    "Marcou algo errado? Escolhe o item pra remover da lista",
+                    options=list(range(len(pendentes_deste_cliente))),
+                    format_func=lambda i: f"{i + 1}. {pendentes_deste_cliente[i]}",
+                    key="ra_remover_indice",
+                    label_visibility="visible",
+                )
+            with col_remover_botao:
+                st.write("")
+                st.write("")
+                if st.button("Remover esse item"):
+                    pendentes_deste_cliente.pop(indice_remover)
+                    if not pendentes_deste_cliente:
+                        pendentes_por_telefone.pop(digitos_tel, None)
+                    st.rerun()
 
     rotulo_botao_marcar = "Registrar atendimento retroativo" if retroativo else "Marcar serviço nesta visita"
     enviar = st.button(rotulo_botao_marcar, type="primary")
