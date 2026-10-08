@@ -15,7 +15,7 @@ import streamlit as st
 import catalogo
 import sheets
 
-st.set_page_config(page_title="LavaPet — Controle de Pacotes", page_icon="🐾", layout="wide")
+st.set_page_config(page_title="LavaPet — Controle de Pacotes", page_icon="assets/logo_lavapet.png", layout="wide")
 
 
 def _senha_configurada():
@@ -48,7 +48,7 @@ if _SENHA:
                 st.error("Senha incorreta.")
         st.stop()
 
-st.sidebar.title("🐾 LavaPet")
+st.sidebar.image("assets/logo_lavapet.png", width=120)
 pagina = st.sidebar.radio(
     "Menu",
     ["📊 Painel de Pacotes", "➕ Novo Pacote", "✅ Registrar Atendimento", "📜 Histórico do Cliente"],
