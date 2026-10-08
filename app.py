@@ -111,6 +111,47 @@ def _buscar_cliente_por_telefone(digitos: str):
     }
 
 
+def _saldo_disponivel_cliente(digitos_tel, servico, condominio):
+    """
+    Confere, direto na planilha, quanto de saldo esse cliente tem agora pra
+    esse serviço — usada só pra avisar NA HORA em "Registrar Atendimento" se
+    provavelmente não vai ter saldo suficiente, sem gravar nada (a gravação
+    de verdade só acontece quando você clica em "Finalizar", que confere o
+    saldo de novo do lado do Apps Script antes de escrever qualquer coisa).
+
+    Devolve None quando não dá pra conferir agora (planilha fora do ar, por
+    exemplo) — nesse caso o app deixa passar sem avisar, e quem decide de
+    verdade é sempre o "Finalizar".
+    """
+    try:
+        df = sheets.ler_pacotes_df()
+    except Exception:
+        return None
+    col_telefone = next((c for c in df.columns if "telefone" in c.lower()), None)
+    col_servico = next((c for c in df.columns if c.lower().strip() == "serviço" or c.lower().strip() == "servico"), None)
+    col_condominio = next((c for c in df.columns if "condom" in c.lower()), None)
+    col_qtd_comprada = next((c for c in df.columns if "qtd comprada" in c.lower()), None)
+    col_qtd_usada = next((c for c in df.columns if "qtd usada" in c.lower()), None)
+    if not all([col_telefone, col_servico, col_qtd_comprada, col_qtd_usada]):
+        return None
+
+    digitos_coluna = df[col_telefone].astype(str).str.replace(r"\D", "", regex=True)
+    filtro = (digitos_coluna == digitos_tel) & (
+        df[col_servico].astype(str).str.strip().str.lower() == str(servico).strip().lower()
+    )
+    if condominio and col_condominio:
+        filtro &= df[col_condominio].astype(str).str.strip().str.lower() == str(condominio).strip().lower()
+
+    linhas = df[filtro]
+    if linhas.empty:
+        return 0
+
+    comprada = pd.to_numeric(linhas[col_qtd_comprada], errors="coerce").fillna(0)
+    usada = pd.to_numeric(linhas[col_qtd_usada], errors="coerce").fillna(0)
+    saldo = (comprada - usada).clip(lower=0).sum()
+    return int(saldo)
+
+
 # ------------------------------------------------------------
 # 📊 Painel de Pacotes
 # ------------------------------------------------------------
@@ -428,10 +469,13 @@ elif pagina == "➕ Novo Pacote":
 elif pagina == "✅ Registrar Atendimento":
     st.header("✅ Registrar Atendimento")
     st.caption(
-        "Desconta 1 do saldo do pacote a cada serviço marcado. A mensagem de WhatsApp pro "
-        "cliente NÃO sai a cada item — ela fica \"guardada\" e só é enviada (uma vez só, com "
-        "tudo que foi usado) quando você clicar em \"Finalizar atendimento e enviar resumo\", "
-        "lá embaixo. Lançamento retroativo nunca manda mensagem, igual já era antes."
+        "Nada é gravado na planilha enquanto você só vai marcando os serviços aqui — eles "
+        "ficam guardados só nesta tela. Só quando você clicar em \"Finalizar atendimento e "
+        "enviar resumo\" é que o app desconta o saldo, grava o histórico e manda UMA mensagem "
+        "pro cliente com tudo que foi usado na visita. Se desistir no meio ou marcar algo "
+        "errado, é só cancelar — como nada foi gravado ainda, não sobra nada pra corrigir na "
+        "planilha depois. Lançamento retroativo é diferente: grava na hora (é uma correção de "
+        "uma visita passada), mas nunca manda mensagem — igual já era antes."
     )
 
     # Mensagem de sucesso da ação anterior (guardada antes de limpar a tela
@@ -444,10 +488,10 @@ elif pagina == "✅ Registrar Atendimento":
     # desenhado na tela nessa mesma rodada, só dá erro "cannot be modified
     # after the widget...". Por isso a limpeza acontece aqui em cima, numa
     # rodada seguinte, marcada pela flag "_ra_limpar" lá no final do envio).
-    # Só limpamos a tela depois de FINALIZAR o atendimento (ou lançar um
-    # retroativo) — registrar um serviço avulso NÃO limpa mais o telefone,
-    # porque normalmente você vai marcar mais de um serviço seguido pro
-    # mesmo cliente antes de finalizar a visita.
+    # Só limpamos a tela depois de FINALIZAR (ou cancelar) a visita, ou
+    # lançar um retroativo — marcar um serviço avulso NÃO limpa mais o
+    # telefone, porque normalmente você vai marcar mais de um serviço
+    # seguido pro mesmo cliente antes de finalizar a visita.
     if st.session_state.get("_ra_limpar"):
         st.session_state["ra_telefone"] = ""
         st.session_state["ra_condominio"] = ""
@@ -492,73 +536,73 @@ elif pagina == "✅ Registrar Atendimento":
     if retroativo:
         data_reconciliacao = st.date_input("Data em que o atendimento realmente aconteceu").strftime("%Y-%m-%d")
 
-    # Lista local (só pra mostrar na tela) dos serviços já marcados nesta
-    # visita, pra você acompanhar o que já foi registrado antes de clicar
-    # em "Finalizar atendimento". É por telefone, porque você pode estar
-    # alternando entre clientes diferentes na mesma sessão do app.
+    # Lista guardada só nesta tela (sessão do navegador) dos serviços
+    # marcados nesta visita — NADA disso foi gravado na planilha ainda. É
+    # por telefone, porque você pode estar alternando entre clientes
+    # diferentes na mesma sessão do app.
     pendentes_por_telefone = st.session_state.setdefault("_ra_pendentes", {})
     pendentes_deste_cliente = pendentes_por_telefone.get(digitos_tel, [])
 
     if pendentes_deste_cliente:
         st.info(
-            "📋 Itens registrados nesta visita (ainda **não** enviei a mensagem pro cliente):\n\n"
-            + "\n".join(f"- {s}" for s in pendentes_deste_cliente)
+            "📋 Itens marcados nesta visita (ainda **não** gravei na planilha nem mandei "
+            "mensagem):\n\n"
+            + "\n".join(f"{i + 1}. {s}" for i, s in enumerate(pendentes_deste_cliente))
         )
-        # Essa lista é só uma "nota" guardada aqui na tela do navegador —
-        # ela NÃO lê a planilha nem o que está guardado do lado do Apps
-        # Script. Se você editar a planilha na mão (apagar/corrigir linhas
-        # de teste, por exemplo), essa lista aqui não sabe disso e continua
-        # mostrando o que tinha antes. Esse botão só limpa essa nota na
-        # tela — não apaga nem desfaz nada na planilha nem no WhatsApp.
-        if st.button("🗑️ Limpar essa lista (só a nota na tela, não afeta a planilha)"):
-            pendentes_por_telefone.pop(digitos_tel, None)
-            st.rerun()
+        col_remover_sel, col_remover_botao = st.columns([2, 1])
+        with col_remover_sel:
+            indice_remover = st.selectbox(
+                "Marcou algo errado? Escolhe o item pra remover da lista",
+                options=list(range(len(pendentes_deste_cliente))),
+                format_func=lambda i: f"{i + 1}. {pendentes_deste_cliente[i]}",
+                key="ra_remover_indice",
+                label_visibility="visible",
+            )
+        with col_remover_botao:
+            st.write("")
+            st.write("")
+            if st.button("Remover esse item"):
+                pendentes_deste_cliente.pop(indice_remover)
+                if not pendentes_deste_cliente:
+                    pendentes_por_telefone.pop(digitos_tel, None)
+                st.rerun()
 
-    enviar = st.button("Registrar atendimento", type="primary")
-    finalizar = st.button("✅ Finalizar atendimento e enviar resumo", disabled=not telefone)
+    rotulo_botao_marcar = "Registrar atendimento retroativo" if retroativo else "Marcar serviço nesta visita"
+    enviar = st.button(rotulo_botao_marcar, type="primary")
+    finalizar = st.button(
+        "✅ Finalizar atendimento e enviar resumo",
+        disabled=not telefone or not pendentes_deste_cliente,
+    )
 
-    # Botão de cancelar fica separado e "escondido" de propósito (dentro de
-    # um expander, fechado por padrão, e só liberado depois de marcar a
-    # caixinha de confirmação). Ele faz o oposto do "Finalizar": apaga o
-    # resumo SEM mandar mensagem. Como ficava logo do lado do "Finalizar",
-    # um clique errado ali faria o cliente nunca receber a mensagem do
-    # atendimento de verdade — essa fricção extra é proposital, pra ninguém
-    # apertar por engano.
+    # Cancelar agora é simples e sem risco: como nada foi gravado na
+    # planilha enquanto você só marca os serviços aqui, cancelar é só
+    # esquecer a lista desta tela — não precisa desfazer nada em lugar
+    # nenhum, nem mandar nenhuma mensagem.
     st.divider()
-    cancelar_pendente = False
-    with st.expander("⚠️ Cancelar o que ainda não enviei (só pra corrigir um teste que deu errado)"):
-        st.warning(
-            "Isso apaga o resumo que ia ser enviado pra esse telefone, SEM mandar "
-            "mensagem pro cliente. **Só use isso se foi um teste/erro.** Se o "
-            "atendimento foi de verdade, use o botão \"Finalizar atendimento e "
-            "enviar resumo\" acima, não este."
-        )
-        confirmar_cancelamento = st.checkbox(
-            "Sim, tenho certeza — não é um atendimento de verdade",
-            key="ra_confirma_cancelar",
-        )
-        cancelar_pendente = st.button(
-            "🧹 Cancelar mesmo assim (sem mandar mensagem)",
-            disabled=not telefone or not confirmar_cancelamento,
-        )
+    cancelar_pendente = st.button(
+        "🧹 Cancelar os itens marcados nesta visita",
+        disabled=not pendentes_deste_cliente,
+        help=(
+            "Esquece a lista marcada acima pra esse telefone. Como nada foi gravado na "
+            "planilha ainda, não tem nada pra desfazer — só limpa a tela."
+        ),
+    )
 
     if enviar:
         if not telefone:
             st.warning("Preencha o telefone do cliente.")
-        else:
-            # Trava contra clique duplo: se clicar duas vezes rápido (ou a
-            # página demorar pra responder e der outro clique por engano),
-            # sem isso o app registrava o MESMO atendimento duas vezes,
-            # descontando 2 do saldo em vez de 1. Só deixa repetir o mesmo
-            # telefone+serviço de novo depois de alguns segundos.
-            assinatura = (digitos_tel, servico, condominio, retroativo, data_reconciliacao)
+        elif retroativo:
+            # Lançamento retroativo é diferente do resto desta tela: grava na
+            # planilha NA HORA (é uma correção de uma visita que já aconteceu
+            # no passado, não faz sentido ficar "esperando" junto com uma
+            # visita em andamento) e nunca manda mensagem — igual já era.
+            assinatura = (digitos_tel, servico, condominio, True, data_reconciliacao)
             agora_ts = time.time()
             ultimo = st.session_state.get("_ra_ultimo_envio")
             if ultimo and ultimo[0] == assinatura and (agora_ts - ultimo[1]) < 8:
                 st.warning(
-                    "Esse mesmo atendimento acabou de ser registrado agora mesmo — não registrei de "
-                    "novo pra não descontar em dobro. Se for outro atendimento de verdade, espera "
-                    "alguns segundos e clica de novo."
+                    "Esse mesmo lançamento acabou de ser registrado agora mesmo — não registrei "
+                    "de novo pra não descontar em dobro."
                 )
             else:
                 st.session_state["_ra_ultimo_envio"] = (assinatura, agora_ts)
@@ -569,26 +613,10 @@ elif pagina == "✅ Registrar Atendimento":
                         condominio=condominio,
                         data_reconciliacao=data_reconciliacao,
                     )
-                    if resultado.get("mensagemEnviada"):
-                        # Não manda WhatsApp na hora — só entra na fila do lado do
-                        # Apps Script. Guardamos aqui também, localmente, só pra
-                        # mostrar a lista "itens desta visita" na tela.
-                        pendentes_por_telefone.setdefault(digitos_tel, []).append(servico)
-                        msg = (
-                            f"Serviço \"{servico}\" registrado! Saldo restante: {resultado.get('saldoRestante')}. "
-                            "Ainda não mandei a mensagem pro cliente — clica em \"Finalizar atendimento\" "
-                            "quando terminar de registrar tudo dessa visita."
-                        )
-                    else:
-                        msg = (
-                            f"Atendimento retroativo registrado! Saldo restante: {resultado.get('saldoRestante')}. "
-                            "Nenhuma mensagem foi enviada (retroativo nunca manda)."
-                        )
-                    # Guarda a mensagem de sucesso. NÃO limpa o telefone aqui — só
-                    # ao finalizar o atendimento (ver bloco "if finalizar" abaixo),
-                    # porque o normal é marcar mais de um serviço seguido pro
-                    # mesmo cliente antes de encerrar a visita.
-                    st.session_state["_ra_sucesso_msg"] = msg
+                    st.session_state["_ra_sucesso_msg"] = (
+                        f"Atendimento retroativo registrado! Saldo restante: {resultado.get('saldoRestante')}. "
+                        "Nenhuma mensagem foi enviada (retroativo nunca manda)."
+                    )
                     st.rerun()
                 except Exception as e:
                     mensagem_erro = str(e).lower()
@@ -599,44 +627,66 @@ elif pagina == "✅ Registrar Atendimento":
                         )
                     else:
                         formatar_erro(e)
+        else:
+            # Fluxo normal (não retroativo): NÃO grava nada na planilha
+            # ainda — só marca aqui na tela. A conferência de saldo abaixo é
+            # só um AVISO rápido (lê a planilha, mas não escreve nada); quem
+            # decide de verdade é o "Finalizar", que confere tudo de novo
+            # antes de gravar qualquer coisa.
+            ja_marcados_mesmo_servico = sum(1 for s in pendentes_deste_cliente if s == servico)
+            saldo_real = _saldo_disponivel_cliente(digitos_tel, servico, condominio)
+            if saldo_real is not None and (saldo_real - ja_marcados_mesmo_servico) <= 0:
+                st.warning(
+                    f"Esse cliente não parece ter mais saldo disponível pra \"{servico}\" "
+                    "(considerando o que já tá marcado nesta visita). Confere se ele não "
+                    "precisa de um pacote novo — ainda assim marquei o item na lista; o "
+                    "\"Finalizar\" confere de novo e, se realmente não tiver saldo, nada é "
+                    "gravado e ele te avisa."
+                )
+            pendentes_por_telefone.setdefault(digitos_tel, []).append(servico)
+            st.session_state["_ra_sucesso_msg"] = (
+                f"\"{servico}\" marcado nesta visita — ainda não gravei nada na planilha. "
+                "Clica em \"Finalizar atendimento\" quando terminar de marcar tudo que o "
+                "cliente usou."
+            )
+            st.rerun()
 
     if finalizar:
         try:
-            resultado = sheets.finalizar_atendimento(telefone=telefone)
+            resultado = sheets.finalizar_visita_completa(
+                telefone=telefone,
+                condominio=condominio,
+                servicos=pendentes_deste_cliente,
+            )
             if resultado.get("enviado"):
                 servicos_enviados = resultado.get("servicos") or pendentes_deste_cliente
                 msg = (
-                    f"Resumo enviado pro cliente! Serviços dessa visita: "
+                    "Resumo enviado pro cliente! Serviços dessa visita: "
                     + ", ".join(servicos_enviados) + "."
                 )
             else:
-                msg = (
-                    "Não tinha nenhum serviço pendente pra esse telefone pra mandar "
-                    "(talvez você só tenha feito lançamentos retroativos, ou já tinha finalizado antes)."
-                )
+                msg = resultado.get("motivo") or "Não tinha nenhum serviço marcado pra essa visita."
             pendentes_por_telefone.pop(digitos_tel, None)
             st.session_state["_ra_sucesso_msg"] = msg
             st.session_state["_ra_limpar"] = True
             st.rerun()
         except Exception as e:
-            formatar_erro(e)
-
-    if cancelar_pendente:
-        try:
-            resultado = sheets.cancelar_atendimento_pendente(telefone=telefone)
-            if resultado.get("cancelado"):
-                msg = (
-                    "Cancelado! Apaguei o que tava esperando pra esse telefone "
-                    "(não mandei nenhuma mensagem pro cliente)."
+            mensagem_erro = str(e).lower()
+            if "sem saldo suficiente" in mensagem_erro:
+                st.warning(
+                    f"Não deu pra finalizar: {e} Nada foi gravado na planilha — ajusta a lista "
+                    "de serviços (remove o item sem saldo) e tenta finalizar de novo."
                 )
             else:
-                msg = "Não tinha nada esperando pra esse telefone — nada pra cancelar."
-            pendentes_por_telefone.pop(digitos_tel, None)
-            st.session_state["_ra_sucesso_msg"] = msg
-            st.session_state["_ra_limpar"] = True
-            st.rerun()
-        except Exception as e:
-            formatar_erro(e)
+                formatar_erro(e)
+
+    if cancelar_pendente:
+        pendentes_por_telefone.pop(digitos_tel, None)
+        st.session_state["_ra_sucesso_msg"] = (
+            "Cancelado — como nada tinha sido gravado na planilha, não sobrou nada pra desfazer."
+        )
+        st.session_state["_ra_limpar"] = True
+        st.rerun()
 
 
 # ------------------------------------------------------------
