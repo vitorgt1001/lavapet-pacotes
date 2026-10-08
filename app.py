@@ -554,7 +554,11 @@ elif pagina == "✅ Registrar Atendimento":
                 "mandei mensagem):"
             )
             st.markdown("\n".join(f"{i + 1}. {s}" for i, s in enumerate(pendentes_deste_cliente)))
-            st.divider()
+            # Sem st.divider() aqui de propósito: em algumas versões do
+            # Streamlit, a linha divisória "escapa" visualmente do quadro
+            # com borda e dá a impressão de que virou uma caixa separada.
+            # Um espaço em branco simples é mais seguro.
+            st.write("")
             col_remover_sel, col_remover_botao = st.columns([2, 1])
             with col_remover_sel:
                 indice_remover = st.selectbox(
