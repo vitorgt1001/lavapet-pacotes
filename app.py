@@ -15,7 +15,20 @@ import streamlit as st
 import catalogo
 import sheets
 
-st.set_page_config(page_title="LavaPet — Controle de Pacotes", page_icon="assets/logo_lavapet.png", layout="wide")
+
+# Caminho da logo — fica direto na raiz do repositório (mesmo lugar do
+# app.py), sem precisar de pasta separada. Se o arquivo não estiver
+# presente no servidor por algum motivo, o app usa a pata de cachorro 🐾
+# no lugar em vez de travar com erro — assim uma logo faltando nunca
+# derruba o app inteiro.
+LOGO_PATH = "logo_lavapet.png"
+_TEM_LOGO = os.path.exists(LOGO_PATH)
+
+st.set_page_config(
+    page_title="LavaPet — Controle de Pacotes",
+    page_icon=LOGO_PATH if _TEM_LOGO else "🐾",
+    layout="wide",
+)
 
 
 def _senha_configurada():
@@ -38,7 +51,11 @@ if _SENHA:
         st.session_state.autenticado = False
 
     if not st.session_state.autenticado:
-        st.title("🐾 LavaPet — Controle de Pacotes")
+        if _TEM_LOGO:
+            st.image(LOGO_PATH, width=120)
+            st.title("LavaPet — Controle de Pacotes")
+        else:
+            st.title("🐾 LavaPet — Controle de Pacotes")
         senha_digitada = st.text_input("Senha de acesso", type="password")
         if st.button("Entrar"):
             if senha_digitada == _SENHA:
@@ -48,7 +65,10 @@ if _SENHA:
                 st.error("Senha incorreta.")
         st.stop()
 
-st.sidebar.image("assets/logo_lavapet.png", width=120)
+if _TEM_LOGO:
+    st.sidebar.image(LOGO_PATH, width=120)
+else:
+    st.sidebar.title("🐾 LavaPet")
 pagina = st.sidebar.radio(
     "Menu",
     ["📊 Painel de Pacotes", "➕ Novo Pacote", "✅ Registrar Atendimento", "📜 Histórico do Cliente"],
