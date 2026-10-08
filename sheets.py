@@ -278,6 +278,26 @@ def finalizar_atendimento(telefone):
     return chamar_api_apps_script("finalizar_atendimento", telefone=telefone)
 
 
+def finalizar_visita_completa(telefone, condominio, servicos):
+    """
+    Fluxo novo: manda a lista INTEIRA de serviços de uma visita de uma vez
+    só. Do lado do Apps Script, primeiro confere se tem saldo pra todos ANTES
+    de gravar qualquer coisa na planilha — se faltar saldo pra algum, nada é
+    gravado e vem um erro explicando qual. Se passar, grava tudo e manda UMA
+    mensagem de WhatsApp com o resumo.
+
+    Usada pelo botão "Finalizar atendimento e enviar resumo" no fluxo novo,
+    onde nada toca na planilha enquanto você só vai marcando os serviços na
+    tela — só quando você confirma aqui é que vira "realidade" na planilha.
+    """
+    return chamar_api_apps_script(
+        "finalizar_visita_completa",
+        telefone=telefone,
+        condominio=condominio,
+        servicos=servicos,
+    )
+
+
 def cancelar_atendimento_pendente(telefone):
     """
     Apaga a fila de serviços pendentes desse telefone (do lado do Apps
