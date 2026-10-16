@@ -7,13 +7,20 @@ e portes. Vem direto das tabelas de preço do prompt do WhatsApp
 serviço não é travado por aqui, você sempre pode digitar/ajustar o valor
 real cobrado na hora de cadastrar um pacote (por causa de descontos,
 promoções etc.).
+
+CORRIGIDO em 16/10/2026: "Vila Mariana" estava errado, misturado junto
+com "Vila 11 Pinheiros" num item só ("Vila 11 Vila Mariana"), usando por
+engano o preço da Vila 11 Pinheiros. São dois condomínios DIFERENTES, com
+tabelas de preço diferentes. Confirmado com a Patricia (cliente) e com o
+Marco: Vila Mariana usa a MESMA tabela da Ventana (Banho 59/79/99/119,
+Tosa Completa Tesoura 149/179/209, com SpaPet).
 """
 
 CONDOMINIOS = [
     "Humanari",
     "Vivaz Rio Bonito",
     "Vila 11 Pinheiros",
-    "Vila 11 Vila Mariana",
+    "Vila Mariana",
     "Ventana",
 ]
 
@@ -25,7 +32,7 @@ SERVICOS = [
     "Hidratação",
     "Escovação de Dente",
     "Remoção de Subpelo",
-    "SpaPet",  # exclusivo Ventana
+    "SpaPet",  # Ventana e Vila Mariana
 ]
 
 PORTES = ["P", "M", "G", "GG"]
@@ -61,14 +68,15 @@ PRECOS_REFERENCIA = {
         "Escovação de Dente": 5,
         "Remoção de Subpelo": 35,
     },
-    "Vila 11 Vila Mariana": {
-        "Banho": {"P": 64, "M": 84, "G": 104, "GG": 124},
-        "Tosa Completa Máquina": {"P": 129, "M": 159, "G": 189},
-        "Tosa Completa Tesoura": {"P": 169, "M": 189, "G": 229},
+    "Vila Mariana": {
+        "Banho": {"P": 59, "M": 79, "G": 99, "GG": 119},
+        "Tosa Completa Máquina": {"P": 129, "M": 149, "G": 179},
+        "Tosa Completa Tesoura": {"P": 149, "M": 179, "G": 209},
         "Tosa Higiênica": 25,
         "Hidratação": 39,
         "Escovação de Dente": 5,
         "Remoção de Subpelo": 35,
+        "SpaPet": 249,
     },
     "Ventana": {
         "Banho": {"P": 59, "M": 79, "G": 99, "GG": 119},
