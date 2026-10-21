@@ -8,7 +8,6 @@ Pra rodar:  streamlit run app.py
 import datetime as dt
 import os
 import re
-import time
 
 import pandas as pd
 import streamlit as st
@@ -107,6 +106,26 @@ def _condominio_canonico(valor: str):
         if re.sub(r"\s+", " ", opcao).strip().lower() == limpo:
             return opcao
     return None
+
+
+def _data_br(data_iso: str) -> str:
+    """Converte 'YYYY-MM-DD' pra 'DD/MM/YYYY', só pra mostrar na tela."""
+    try:
+        return dt.datetime.strptime(data_iso, "%Y-%m-%d").strftime("%d/%m/%Y")
+    except Exception:
+        return data_iso or ""
+
+
+def _mensagem_erro_amigavel(servico: str, e: Exception) -> str:
+    """
+    Mesma lógica de antes pra detectar 'sem saldo' e dar uma mensagem mais
+    clara — só que agora reaproveitada pra cada item de uma lista (lançamento
+    retroativo em lote), não só pra um clique avulso.
+    """
+    mensagem_erro = str(e).lower()
+    if "saldo" in mensagem_erro and ("dispon" in mensagem_erro or "zerad" in mensagem_erro or "nenhum pacote" in mensagem_erro):
+        return f"{servico}: sem saldo disponível nesse pacote (confere se precisa comprar um pacote novo)"
+    return f"{servico}: {e}"
 
 
 @st.cache_data(ttl=60)
@@ -498,18 +517,24 @@ elif pagina == "✅ Registrar Atendimento":
     st.header("✅ Registrar Atendimento")
     st.caption(
         "Nada é gravado na planilha enquanto você só vai marcando os serviços aqui — eles "
-        "ficam guardados só nesta tela. Só quando você clicar em \"Finalizar atendimento e "
-        "enviar resumo\" é que o app desconta o saldo, grava o histórico e manda UMA mensagem "
-        "pro cliente com tudo que foi usado na visita. Se desistir no meio ou marcar algo "
+        "ficam guardados só nesta tela, numa lista que você pode revisar e corrigir antes de "
+        "confirmar. Só quando você clicar em \"Finalizar atendimento e enviar resumo\" é que o "
+        "app desconta o saldo, grava o histórico e manda UMA mensagem pro cliente com tudo que "
+        "foi usado na visita. Lançamento retroativo (correção de uma visita passada) funciona "
+        "do mesmo jeito — marca vários serviços na lista, revisa, e só grava quando você clica "
+        "em \"Finalizar lançamento retroativo\" — a única diferença é que ele NUNCA manda "
+        "mensagem pro cliente, mesmo depois de finalizado. Se desistir no meio ou marcar algo "
         "errado, é só cancelar — como nada foi gravado ainda, não sobra nada pra corrigir na "
-        "planilha depois. Lançamento retroativo é diferente: grava na hora (é uma correção de "
-        "uma visita passada), mas nunca manda mensagem — igual já era antes."
+        "planilha depois."
     )
 
-    # Mensagem de sucesso da ação anterior (guardada antes de limpar a tela
-    # — ver comentário mais abaixo, no bloco "if enviar" / "if finalizar").
+    # Mensagem de sucesso (verde) e de aviso (amarelo) da ação anterior
+    # (guardadas antes de limpar a tela — ver comentário mais abaixo, nos
+    # blocos "if enviar" / "if finalizar" / "if finalizar_retro").
     if st.session_state.get("_ra_sucesso_msg"):
         st.success(st.session_state.pop("_ra_sucesso_msg"))
+    if st.session_state.get("_ra_aviso_msg"):
+        st.warning(st.session_state.pop("_ra_aviso_msg"))
 
     # Limpa os campos ANTES de criar os widgets (igual o Streamlit exige —
     # não dá pra mudar st.session_state de um campo DEPOIS que ele já foi
@@ -565,12 +590,24 @@ elif pagina == "✅ Registrar Atendimento":
     if retroativo:
         data_reconciliacao = st.date_input("Data em que o atendimento realmente aconteceu").strftime("%Y-%m-%d")
 
-    # Lista guardada só nesta tela (sessão do navegador) dos serviços
-    # marcados nesta visita — NADA disso foi gravado na planilha ainda. É
-    # por telefone, porque você pode estar alternando entre clientes
-    # diferentes na mesma sessão do app.
+    # Duas listas guardadas só nesta tela (sessão do navegador) — NADA
+    # disso foi gravado na planilha ainda. São por telefone, porque você
+    # pode estar alternando entre clientes diferentes na mesma sessão.
+    #
+    # "_ra_pendentes": serviços de HOJE (fluxo normal) — ao finalizar,
+    # grava tudo e manda UMA mensagem consolidada pro cliente.
+    #
+    # "_ra_pendentes_retro": serviços RETROATIVOS (correção de visita
+    # passada) — cada item guarda também a própria data, porque dá pra
+    # marcar itens de datas diferentes antes de finalizar. Ao finalizar,
+    # grava cada um (com a data dele) e NUNCA manda mensagem — igual
+    # sempre foi, só que agora dá pra revisar a lista antes de confirmar,
+    # em vez de gravar na hora a cada clique.
     pendentes_por_telefone = st.session_state.setdefault("_ra_pendentes", {})
     pendentes_deste_cliente = pendentes_por_telefone.get(digitos_tel, [])
+
+    pendentes_retro_por_telefone = st.session_state.setdefault("_ra_pendentes_retro", {})
+    pendentes_retro_deste_cliente = pendentes_retro_por_telefone.get(digitos_tel, [])
 
     if pendentes_deste_cliente:
         # Lista e "remover item" ficam dentro do MESMO quadro (container com
@@ -579,8 +616,8 @@ elif pagina == "✅ Registrar Atendimento":
         # ficava solto embaixo, sem parecer parte do mesmo bloco.
         with st.container(border=True):
             st.markdown(
-                "📋 **Itens marcados nesta visita** (ainda **não** gravei na planilha nem "
-                "mandei mensagem):"
+                "📋 **Itens marcados nesta visita (hoje)** (ainda **não** gravei na planilha "
+                "nem mandei mensagem):"
             )
             st.markdown("\n".join(f"{i + 1}. {s}" for i, s in enumerate(pendentes_deste_cliente)))
             # Sem st.divider() aqui de propósito: em algumas versões do
@@ -606,24 +643,63 @@ elif pagina == "✅ Registrar Atendimento":
                         pendentes_por_telefone.pop(digitos_tel, None)
                     st.rerun()
 
-    rotulo_botao_marcar = "Registrar atendimento retroativo" if retroativo else "Marcar serviço nesta visita"
+    if pendentes_retro_deste_cliente:
+        with st.container(border=True):
+            st.markdown(
+                "🕒 **Itens retroativos marcados nesta visita** (ainda **não** gravei na "
+                "planilha — nunca manda mensagem pro cliente, nem depois de finalizado):"
+            )
+            st.markdown(
+                "\n".join(
+                    f"{i + 1}. {item['servico']} — {item['data_br']}"
+                    for i, item in enumerate(pendentes_retro_deste_cliente)
+                )
+            )
+            st.write("")
+            col_remover_sel_r, col_remover_botao_r = st.columns([2, 1])
+            with col_remover_sel_r:
+                indice_remover_r = st.selectbox(
+                    "Marcou algo errado? Escolhe o item pra remover da lista",
+                    options=list(range(len(pendentes_retro_deste_cliente))),
+                    format_func=lambda i: (
+                        f"{i + 1}. {pendentes_retro_deste_cliente[i]['servico']} — "
+                        f"{pendentes_retro_deste_cliente[i]['data_br']}"
+                    ),
+                    key="ra_remover_indice_retro",
+                    label_visibility="visible",
+                )
+            with col_remover_botao_r:
+                st.write("")
+                st.write("")
+                if st.button("Remover esse item retroativo"):
+                    pendentes_retro_deste_cliente.pop(indice_remover_r)
+                    if not pendentes_retro_deste_cliente:
+                        pendentes_retro_por_telefone.pop(digitos_tel, None)
+                    st.rerun()
+
+    rotulo_botao_marcar = "Marcar serviço retroativo nesta visita" if retroativo else "Marcar serviço nesta visita"
     enviar = st.button(rotulo_botao_marcar, type="primary")
     finalizar = st.button(
         "✅ Finalizar atendimento e enviar resumo",
         disabled=not telefone or not pendentes_deste_cliente,
     )
+    finalizar_retro = st.button(
+        "🕒 Finalizar lançamento retroativo (sem mensagem)",
+        disabled=not telefone or not pendentes_retro_deste_cliente,
+    )
 
     # Cancelar agora é simples e sem risco: como nada foi gravado na
-    # planilha enquanto você só marca os serviços aqui, cancelar é só
-    # esquecer a lista desta tela — não precisa desfazer nada em lugar
-    # nenhum, nem mandar nenhuma mensagem.
+    # planilha enquanto você só marca os serviços aqui (nem os
+    # retroativos, que agora também só ficam na lista até o "Finalizar
+    # lançamento retroativo"), cancelar é só esquecer as duas listas
+    # desta tela — não precisa desfazer nada em lugar nenhum.
     st.divider()
     cancelar_pendente = st.button(
-        "🧹 Cancelar os itens marcados nesta visita",
-        disabled=not pendentes_deste_cliente,
+        "🧹 Cancelar os itens marcados nesta visita (hoje e retroativos)",
+        disabled=not pendentes_deste_cliente and not pendentes_retro_deste_cliente,
         help=(
-            "Esquece a lista marcada acima pra esse telefone. Como nada foi gravado na "
-            "planilha ainda, não tem nada pra desfazer — só limpa a tela."
+            "Esquece as duas listas marcadas acima pra esse telefone. Como nada foi gravado "
+            "na planilha ainda, não tem nada pra desfazer — só limpa a tela."
         ),
     )
 
@@ -631,41 +707,19 @@ elif pagina == "✅ Registrar Atendimento":
         if not telefone:
             st.warning("Preencha o telefone do cliente.")
         elif retroativo:
-            # Lançamento retroativo é diferente do resto desta tela: grava na
-            # planilha NA HORA (é uma correção de uma visita que já aconteceu
-            # no passado, não faz sentido ficar "esperando" junto com uma
-            # visita em andamento) e nunca manda mensagem — igual já era.
-            assinatura = (digitos_tel, servico, condominio, True, data_reconciliacao)
-            agora_ts = time.time()
-            ultimo = st.session_state.get("_ra_ultimo_envio")
-            if ultimo and ultimo[0] == assinatura and (agora_ts - ultimo[1]) < 8:
-                st.warning(
-                    "Esse mesmo lançamento acabou de ser registrado agora mesmo — não registrei "
-                    "de novo pra não descontar em dobro."
-                )
-            else:
-                st.session_state["_ra_ultimo_envio"] = (assinatura, agora_ts)
-                try:
-                    resultado = sheets.registrar_atendimento(
-                        telefone=telefone,
-                        servico=servico,
-                        condominio=condominio,
-                        data_reconciliacao=data_reconciliacao,
-                    )
-                    st.session_state["_ra_sucesso_msg"] = (
-                        f"Atendimento retroativo registrado! Saldo restante: {resultado.get('saldoRestante')}. "
-                        "Nenhuma mensagem foi enviada (retroativo nunca manda)."
-                    )
-                    st.rerun()
-                except Exception as e:
-                    mensagem_erro = str(e).lower()
-                    if "saldo" in mensagem_erro and ("dispon" in mensagem_erro or "zerad" in mensagem_erro or "nenhum pacote" in mensagem_erro):
-                        st.warning(
-                            f"Esse cliente não tem mais saldo disponível para \"{servico}\" nesse "
-                            "pacote. Confere se ele já usou tudo e precisa comprar um pacote novo."
-                        )
-                    else:
-                        formatar_erro(e)
+            # Só marca aqui na tela (igual o fluxo normal) — nada é gravado
+            # na planilha ainda. Cada item guarda a PRÓPRIA data escolhida,
+            # então dá pra marcar serviços de datas retroativas diferentes
+            # antes de finalizar tudo de uma vez.
+            pendentes_retro_por_telefone.setdefault(digitos_tel, []).append(
+                {"servico": servico, "data": data_reconciliacao, "data_br": _data_br(data_reconciliacao)}
+            )
+            st.session_state["_ra_sucesso_msg"] = (
+                f"\"{servico}\" marcado como retroativo ({_data_br(data_reconciliacao)}) — ainda não "
+                "gravei nada na planilha. Clica em \"Finalizar lançamento retroativo\" quando "
+                "terminar de marcar tudo dessa visita passada."
+            )
+            st.rerun()
         else:
             # Fluxo normal (não retroativo): NÃO grava nada na planilha
             # ainda — só marca aqui na tela. A conferência de saldo abaixo é
@@ -719,8 +773,51 @@ elif pagina == "✅ Registrar Atendimento":
             else:
                 formatar_erro(e)
 
+    if finalizar_retro:
+        # Grava cada item da lista retroativa, um de cada vez (cada um com
+        # a própria data) — NUNCA manda mensagem pro cliente, igual sempre
+        # foi. Item que der erro (ex: sem saldo) fica na lista pra você
+        # corrigir (ex: cadastrar um pacote novo) e tentar de novo; os que
+        # derem certo saem da lista.
+        sucesso = []
+        falhas = []
+        restantes = []
+        for item in list(pendentes_retro_deste_cliente):
+            try:
+                sheets.registrar_atendimento(
+                    telefone=telefone,
+                    servico=item["servico"],
+                    condominio=condominio,
+                    data_reconciliacao=item["data"],
+                )
+                sucesso.append(f"{item['servico']} ({item['data_br']})")
+            except Exception as e:
+                falhas.append(_mensagem_erro_amigavel(item["servico"], e))
+                restantes.append(item)
+
+        if restantes:
+            pendentes_retro_por_telefone[digitos_tel] = restantes
+        else:
+            pendentes_retro_por_telefone.pop(digitos_tel, None)
+
+        if sucesso and not falhas:
+            st.session_state["_ra_sucesso_msg"] = (
+                "Lançamentos retroativos gravados: " + ", ".join(sucesso) + ". "
+                "Nenhuma mensagem foi enviada (retroativo nunca manda)."
+            )
+            st.session_state["_ra_limpar"] = True
+        else:
+            if sucesso:
+                st.session_state["_ra_sucesso_msg"] = "Gravado: " + ", ".join(sucesso) + "."
+            st.session_state["_ra_aviso_msg"] = (
+                "Não deu pra gravar (continuam marcados pra você corrigir e tentar de novo): "
+                + "; ".join(falhas)
+            )
+        st.rerun()
+
     if cancelar_pendente:
         pendentes_por_telefone.pop(digitos_tel, None)
+        pendentes_retro_por_telefone.pop(digitos_tel, None)
         st.session_state["_ra_sucesso_msg"] = (
             "Cancelado — como nada tinha sido gravado na planilha, não sobrou nada pra desfazer."
         )
