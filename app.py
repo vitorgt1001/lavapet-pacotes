@@ -116,6 +116,19 @@ def _data_br(data_iso: str) -> str:
         return data_iso or ""
 
 
+def _normalizar_servico_para_comparacao(valor: str) -> str:
+    """
+    Mesma ideia da normalizarServico_ do Apps Script: tira o PORTE do final
+    (ex: "Banho P" -> "banho"), se tiver, porque pacotes antigos (cadastrados
+    na mão antes desse app existir) guardam o serviço com o porte junto,
+    mas o menu "Serviço utilizado" só oferece o nome genérico. Usada só
+    pro aviso rápido de saldo aqui no Python — quem decide de verdade
+    sempre é o Apps Script, que já faz essa mesma normalização.
+    """
+    texto = re.sub(r"\s+(GG|P|M|G)$", "", str(valor or "").strip(), flags=re.IGNORECASE)
+    return texto.strip().lower()
+
+
 def _mensagem_erro_amigavel(servico: str, e: Exception) -> str:
     """
     Mesma lógica de antes pra detectar 'sem saldo' e dar uma mensagem mais
@@ -183,7 +196,8 @@ def _saldo_disponivel_cliente(digitos_tel, servico, condominio):
 
     digitos_coluna = df[col_telefone].astype(str).str.replace(r"\D", "", regex=True)
     filtro = (digitos_coluna == digitos_tel) & (
-        df[col_servico].astype(str).str.strip().str.lower() == str(servico).strip().lower()
+        df[col_servico].astype(str).apply(_normalizar_servico_para_comparacao)
+        == _normalizar_servico_para_comparacao(servico)
     )
     if condominio and col_condominio:
         filtro &= df[col_condominio].astype(str).str.strip().str.lower() == str(condominio).strip().lower()
