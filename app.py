@@ -7,6 +7,7 @@ Pra rodar:  streamlit run app.py
 
 import datetime as dt
 import os
+import re
 import time
 
 import pandas as pd
@@ -80,6 +81,32 @@ st.sidebar.caption("Controle de pacotes — versão simples, feita com Streamlit
 
 def formatar_erro(e: Exception):
     st.error(f"Deu erro: {e}")
+
+
+def _condominio_canonico(valor: str):
+    """
+    Tenta casar o texto de condomínio que veio da planilha (que pode ter
+    vindo de copia/cola, com espaço a mais, caractere invisível de zero
+    largura, ou maiúscula/minúscula diferente) com um dos nomes EXATOS
+    esperados pelo app (catalogo.CONDOMINIOS). Sem isso, o
+    autopreenchimento do campo Condomínio simplesmente não acontecia
+    (sem nenhum erro visível) pra qualquer linha com uma dessas pequenas
+    diferenças de texto — foi o que aconteceu com uma linha do Leandro em
+    21/10/2026.
+
+    Devolve o nome "oficial" (com a grafia certinha do catalogo.py) se
+    achar uma correspondência, ou None se não achar nada parecido.
+    """
+    if not valor:
+        return None
+    limpo = re.sub(r"[​‌‍﻿\xa0]", " ", str(valor))
+    limpo = re.sub(r"\s+", " ", limpo).strip().lower()
+    if not limpo:
+        return None
+    for opcao in catalogo.CONDOMINIOS:
+        if re.sub(r"\s+", " ", opcao).strip().lower() == limpo:
+            return opcao
+    return None
 
 
 @st.cache_data(ttl=60)
@@ -286,8 +313,9 @@ elif pagina == "➕ Novo Pacote":
     if cliente_existente and st.session_state.get("_np_tel_autofill") != digitos_tel:
         if cliente_existente["nome"]:
             st.session_state["np_nome"] = cliente_existente["nome"]
-        if cliente_existente["condominio"] in catalogo.CONDOMINIOS:
-            st.session_state["np_condominio"] = cliente_existente["condominio"]
+        condominio_canonico = _condominio_canonico(cliente_existente["condominio"])
+        if condominio_canonico:
+            st.session_state["np_condominio"] = condominio_canonico
         st.session_state["_np_tel_autofill"] = digitos_tel
 
     c1, c2 = st.columns(2)
@@ -510,8 +538,9 @@ elif pagina == "✅ Registrar Atendimento":
     cliente_existente = _buscar_cliente_por_telefone(digitos_tel) if len(digitos_tel) >= 8 else None
 
     if cliente_existente and st.session_state.get("_ra_tel_autofill") != digitos_tel:
-        if cliente_existente["condominio"] in catalogo.CONDOMINIOS:
-            st.session_state["ra_condominio"] = cliente_existente["condominio"]
+        condominio_canonico = _condominio_canonico(cliente_existente["condominio"])
+        if condominio_canonico:
+            st.session_state["ra_condominio"] = condominio_canonico
         st.session_state["_ra_tel_autofill"] = digitos_tel
 
     c1, c2 = st.columns(2)
