@@ -518,14 +518,13 @@ elif pagina == "✅ Registrar Atendimento":
     st.caption(
         "Nada é gravado na planilha enquanto você só vai marcando os serviços aqui — eles "
         "ficam guardados só nesta tela, numa lista que você pode revisar e corrigir antes de "
-        "confirmar. Só quando você clicar em \"Finalizar atendimento e enviar resumo\" é que o "
-        "app desconta o saldo, grava o histórico e manda UMA mensagem pro cliente com tudo que "
-        "foi usado na visita. Lançamento retroativo (correção de uma visita passada) funciona "
-        "do mesmo jeito — marca vários serviços na lista, revisa, e só grava quando você clica "
-        "em \"Finalizar lançamento retroativo\" — a única diferença é que ele NUNCA manda "
-        "mensagem pro cliente, mesmo depois de finalizado. Se desistir no meio ou marcar algo "
-        "errado, é só cancelar — como nada foi gravado ainda, não sobra nada pra corrigir na "
-        "planilha depois."
+        "confirmar. Registrar e mandar mensagem agora são duas coisas SEPARADAS: \"Registrar "
+        "atendimento\" grava os itens marcados e desconta o saldo, sem mandar nada pro "
+        "cliente; \"Enviar resumo pro cliente\" é quem manda a mensagem, na hora que você "
+        "quiser (pode ser na hora, mais tarde, ou só no dia seguinte). Lançamento retroativo "
+        "funciona parecido (marca, revisa, finaliza), mas esse NUNCA manda mensagem, nem pelo "
+        "botão de enviar resumo. Se desistir no meio ou marcar algo errado, é só cancelar — "
+        "como nada foi gravado ainda, não sobra nada pra corrigir na planilha depois."
     )
 
     # Mensagem de sucesso (verde) e de aviso (amarelo) da ação anterior
@@ -680,19 +679,38 @@ elif pagina == "✅ Registrar Atendimento":
     rotulo_botao_marcar = "Marcar serviço retroativo nesta visita" if retroativo else "Marcar serviço nesta visita"
     enviar = st.button(rotulo_botao_marcar, type="primary")
     finalizar = st.button(
-        "✅ Finalizar atendimento e enviar resumo",
+        "✅ Registrar atendimento (sem enviar mensagem)",
         disabled=not telefone or not pendentes_deste_cliente,
+        help=(
+            "Grava os itens marcados acima na planilha e desconta o saldo agora. NÃO manda "
+            "nenhuma mensagem pro cliente — pra isso, use o botão \"Enviar resumo pro "
+            "cliente\" logo abaixo, na hora que você quiser (agora, daqui a pouco, ou só "
+            "amanhã de manhã)."
+        ),
     )
     finalizar_retro = st.button(
         "🕒 Finalizar lançamento retroativo (sem mensagem)",
         disabled=not telefone or not pendentes_retro_deste_cliente,
     )
 
+    st.divider()
+    st.markdown("**📨 Enviar resumo pro cliente**")
+    st.caption(
+        "Manda UMA mensagem pro cliente com tudo que foi registrado (não retroativo) pra esse "
+        "telefone desde a última mensagem enviada. Não precisa ser na mesma hora que você "
+        "registrou — pode clicar aqui mais tarde, ou só no dia seguinte, sem problema. Se não "
+        "tiver nada pendente de envio, o app avisa e não manda nada."
+    )
+    enviar_resumo = st.button("📨 Enviar resumo pro cliente agora", disabled=not telefone)
+
     # Cancelar agora é simples e sem risco: como nada foi gravado na
     # planilha enquanto você só marca os serviços aqui (nem os
     # retroativos, que agora também só ficam na lista até o "Finalizar
     # lançamento retroativo"), cancelar é só esquecer as duas listas
-    # desta tela — não precisa desfazer nada em lugar nenhum.
+    # desta tela — não precisa desfazer nada em lugar nenhum. Isso NÃO
+    # mexe no que já foi registrado de verdade (e está esperando o
+    # "Enviar resumo") — só limpa o que ainda estava marcado aqui na
+    # tela, sem ter gravado nada.
     st.divider()
     cancelar_pendente = st.button(
         "🧹 Cancelar os itens marcados nesta visita (hoje e retroativos)",
@@ -745,33 +763,64 @@ elif pagina == "✅ Registrar Atendimento":
             st.rerun()
 
     if finalizar:
-        try:
-            resultado = sheets.finalizar_visita_completa(
-                telefone=telefone,
-                condominio=condominio,
-                servicos=pendentes_deste_cliente,
+        # Grava cada item da lista, um de cada vez (igual o lançamento
+        # retroativo faz) — e NÃO manda mensagem nenhuma: cada item
+        # registrado entra na fila de pendências do Apps Script, e só sai
+        # de lá quando você clicar em "Enviar resumo pro cliente", na
+        # hora que você quiser. Item que der erro (ex: sem saldo) fica na
+        # lista pra você corrigir e tentar de novo; os que derem certo
+        # saem da lista.
+        sucesso = []
+        falhas = []
+        restantes = []
+        for servico_item in list(pendentes_deste_cliente):
+            try:
+                sheets.registrar_atendimento(
+                    telefone=telefone,
+                    servico=servico_item,
+                    condominio=condominio,
+                    data_reconciliacao="",
+                )
+                sucesso.append(servico_item)
+            except Exception as e:
+                falhas.append(_mensagem_erro_amigavel(servico_item, e))
+                restantes.append(servico_item)
+
+        if restantes:
+            pendentes_por_telefone[digitos_tel] = restantes
+        else:
+            pendentes_por_telefone.pop(digitos_tel, None)
+
+        if sucesso and not falhas:
+            st.session_state["_ra_sucesso_msg"] = (
+                "Registrado na planilha: " + ", ".join(sucesso) + ". Nenhuma mensagem foi "
+                "enviada ainda — use \"Enviar resumo pro cliente\" quando quiser."
             )
+            st.session_state["_ra_limpar"] = True
+        else:
+            if sucesso:
+                st.session_state["_ra_sucesso_msg"] = "Registrado: " + ", ".join(sucesso) + "."
+            st.session_state["_ra_aviso_msg"] = (
+                "Não deu pra registrar (continuam marcados pra você corrigir e tentar de novo): "
+                + "; ".join(falhas)
+            )
+        st.rerun()
+
+    if enviar_resumo:
+        try:
+            resultado = sheets.finalizar_atendimento(telefone)
             if resultado.get("enviado"):
-                servicos_enviados = resultado.get("servicos") or pendentes_deste_cliente
+                servicos_enviados = resultado.get("servicos") or []
                 msg = (
-                    "Resumo enviado pro cliente! Serviços dessa visita: "
+                    "Resumo enviado pro cliente! Serviços dessa mensagem: "
                     + ", ".join(servicos_enviados) + "."
                 )
             else:
-                msg = resultado.get("motivo") or "Não tinha nenhum serviço marcado pra essa visita."
-            pendentes_por_telefone.pop(digitos_tel, None)
+                msg = resultado.get("motivo") or "Não tinha nada pendente de envio pra esse telefone."
             st.session_state["_ra_sucesso_msg"] = msg
-            st.session_state["_ra_limpar"] = True
             st.rerun()
         except Exception as e:
-            mensagem_erro = str(e).lower()
-            if "sem saldo suficiente" in mensagem_erro:
-                st.warning(
-                    f"Não deu pra finalizar: {e} Nada foi gravado na planilha — ajusta a lista "
-                    "de serviços (remove o item sem saldo) e tenta finalizar de novo."
-                )
-            else:
-                formatar_erro(e)
+            formatar_erro(e)
 
     if finalizar_retro:
         # Grava cada item da lista retroativa, um de cada vez (cada um com
