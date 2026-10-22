@@ -278,6 +278,16 @@ def finalizar_atendimento(telefone):
     return chamar_api_apps_script("finalizar_atendimento", telefone=telefone)
 
 
+def visualizar_resumo_pendente(telefone):
+    """
+    Monta e devolve o TEXTO da mensagem que seria enviada AGORA pro cliente
+    (sem enviar nada, sem apagar a fila de pendências) — usado pelo botão
+    "👀 Ver resumo antes de enviar", pra conferir antes de confirmar o envio
+    de verdade com finalizar_atendimento().
+    """
+    return chamar_api_apps_script("visualizar_resumo_pendente", telefone=telefone)
+
+
 def finalizar_visita_completa(telefone, condominio, servicos):
     """
     Fluxo novo: manda a lista INTEIRA de serviços de uma visita de uma vez
