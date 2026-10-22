@@ -728,10 +728,22 @@ elif pagina == "✅ Registrar Atendimento":
     # tela mesmo depois do rerun que o botão "Ver resumo" dispara (sem
     # isso, a prévia desaparecia assim que você olhava pra ela).
     resumo_visualizado_por_telefone = st.session_state.setdefault("_ra_resumo_visualizado", {})
+    # Mesma ideia, mas pro caso de NÃO ter nada pendente: antes esse aviso só
+    # aparecia lá em cima da página (longe do botão "Ver resumo"), então
+    # parecia que o clique não tinha feito nada. Agora mostra bem aqui,
+    # do lado do botão.
+    resumo_vazio_por_telefone = st.session_state.setdefault("_ra_resumo_vazio", {})
     if digitos_tel in resumo_visualizado_por_telefone:
         with st.container(border=True):
             st.markdown("**Prévia da mensagem que será enviada:**")
             st.text(resumo_visualizado_por_telefone[digitos_tel])
+    elif digitos_tel in resumo_vazio_por_telefone:
+        st.info(
+            "🔎 " + resumo_vazio_por_telefone[digitos_tel]
+            + " (ou seja: não tem nada registrado pra esse telefone esperando envio — "
+            "registre algum atendimento primeiro, ou é porque o último resumo já foi "
+            "enviado)."
+        )
 
     # Cancelar agora é simples e sem risco: como nada foi gravado na
     # planilha enquanto você só marca os serviços aqui (nem os
@@ -826,6 +838,7 @@ elif pagina == "✅ Registrar Atendimento":
             # desatualizado assim que novos itens entraram na fila — tira
             # da tela até você clicar em "Ver resumo" de novo.
             resumo_visualizado_por_telefone.pop(digitos_tel, None)
+            resumo_vazio_por_telefone.pop(digitos_tel, None)
 
         if sucesso and not falhas:
             st.session_state["_ra_sucesso_msg"] = (
@@ -847,9 +860,10 @@ elif pagina == "✅ Registrar Atendimento":
             resultado = sheets.visualizar_resumo_pendente(telefone)
             if resultado.get("temPendente"):
                 resumo_visualizado_por_telefone[digitos_tel] = resultado.get("mensagem", "")
+                resumo_vazio_por_telefone.pop(digitos_tel, None)
             else:
                 resumo_visualizado_por_telefone.pop(digitos_tel, None)
-                st.session_state["_ra_aviso_msg"] = (
+                resumo_vazio_por_telefone[digitos_tel] = (
                     resultado.get("motivo") or "Não tinha nada pendente de envio pra esse telefone."
                 )
             st.rerun()
@@ -860,6 +874,7 @@ elif pagina == "✅ Registrar Atendimento":
         try:
             resultado = sheets.finalizar_atendimento(telefone)
             resumo_visualizado_por_telefone.pop(digitos_tel, None)
+            resumo_vazio_por_telefone.pop(digitos_tel, None)
             if resultado.get("enviado"):
                 servicos_enviados = resultado.get("servicos") or []
                 msg = (
@@ -904,6 +919,7 @@ elif pagina == "✅ Registrar Atendimento":
             # Também entraram na fila de pendências pro "Enviar resumo pro
             # cliente" — se tinha uma prévia antiga na tela, não vale mais.
             resumo_visualizado_por_telefone.pop(digitos_tel, None)
+            resumo_vazio_por_telefone.pop(digitos_tel, None)
 
         if sucesso and not falhas:
             st.session_state["_ra_sucesso_msg"] = (
