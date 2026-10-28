@@ -642,6 +642,68 @@ elif pagina == "✅ Registrar Atendimento":
         st.session_state.pop("_ra_tel_autofill", None)
         st.session_state["_ra_limpar"] = False
 
+    # Preenche o campo Telefone com o que foi escolhido na busca por nome
+    # (ver bloco "🔎 Não lembra o telefone?" logo abaixo) — precisa
+    # acontecer ANTES do campo Telefone ser desenhado na tela, mesma regra
+    # de sempre.
+    if st.session_state.get("_ra_usar_telefone_busca"):
+        st.session_state["ra_telefone"] = st.session_state.pop("_ra_usar_telefone_busca")
+
+    with st.expander("🔎 Não lembra o telefone? Busca por nome ou nome do pet"):
+        busca_cliente = st.text_input(
+            "Nome do cliente ou do pet", key="ra_busca_cliente", placeholder="Ex: Neide ou Bart"
+        )
+        if busca_cliente:
+            try:
+                df_busca = sheets.ler_pacotes_df()
+            except Exception:
+                df_busca = pd.DataFrame()
+
+            col_nome_b = next((c for c in df_busca.columns if c.lower().strip() == "nome"), None) if not df_busca.empty else None
+            col_telefone_b = next((c for c in df_busca.columns if "telefone" in c.lower()), None) if not df_busca.empty else None
+            col_condominio_b = next((c for c in df_busca.columns if "condom" in c.lower()), None) if not df_busca.empty else None
+            col_nome_pet_b = next((c for c in df_busca.columns if "nome do pet" in c.lower()), None) if not df_busca.empty else None
+
+            termo = busca_cliente.strip().lower()
+            encontrados = pd.DataFrame()
+            if not df_busca.empty and (col_nome_b or col_nome_pet_b):
+                mascara = pd.Series(False, index=df_busca.index)
+                if col_nome_b:
+                    mascara |= df_busca[col_nome_b].astype(str).str.lower().str.contains(termo, na=False, regex=False)
+                if col_nome_pet_b:
+                    mascara |= df_busca[col_nome_pet_b].astype(str).str.lower().str.contains(termo, na=False, regex=False)
+                encontrados = df_busca[mascara]
+                # Um mesmo cliente aparece em várias linhas (uma por serviço
+                # comprado) — mostra só uma vez por telefone, não precisa
+                # repetir a mesma pessoa várias vezes na lista.
+                if col_telefone_b and not encontrados.empty:
+                    encontrados = encontrados.drop_duplicates(subset=[col_telefone_b])
+
+            if encontrados.empty:
+                st.caption(f"Nenhum cliente encontrado pra \"{busca_cliente}\".")
+            else:
+                limite = 15
+                if len(encontrados) > limite:
+                    st.caption(f"{len(encontrados)} encontrados — mostrando os {limite} primeiros. Refina a busca se não achar quem procura.")
+                for _, linha_enc in encontrados.head(limite).iterrows():
+                    nome_enc = str(linha_enc.get(col_nome_b, "")).strip() if col_nome_b else ""
+                    telefone_enc = str(linha_enc.get(col_telefone_b, "")).strip() if col_telefone_b else ""
+                    condominio_enc = str(linha_enc.get(col_condominio_b, "")).strip() if col_condominio_b else ""
+                    pet_enc = str(linha_enc.get(col_nome_pet_b, "")).strip() if col_nome_pet_b else ""
+                    rotulo = nome_enc or "(sem nome)"
+                    if pet_enc:
+                        rotulo += f" — pet: {pet_enc}"
+                    if condominio_enc:
+                        rotulo += f" — {condominio_enc}"
+                    rotulo += f" — {telefone_enc}"
+                    col_rotulo, col_usar = st.columns([4, 1])
+                    with col_rotulo:
+                        st.write(rotulo)
+                    with col_usar:
+                        if st.button("Usar", key=f"ra_usar_{telefone_enc}_{nome_enc}"):
+                            st.session_state["_ra_usar_telefone_busca"] = telefone_enc
+                            st.rerun()
+
     # Fora de st.form de propósito (igual na página "Novo Pacote"): dentro
     # de um st.form, NENHUM campo atualiza a tela até você clicar no botão
     # final — então o Condomínio nunca preenchia sozinho, e a caixinha de
