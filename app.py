@@ -1131,8 +1131,6 @@ elif pagina == "✅ Registrar Atendimento":
 elif pagina == "📜 Histórico do Cliente":
     st.header("📜 Histórico do Cliente")
 
-    telefone_busca = st.text_input("Buscar por telefone (com DDD)", placeholder="11999999999")
-
     try:
         df = sheets.ler_historico_df()
     except Exception as e:
@@ -1144,12 +1142,57 @@ elif pagina == "📜 Histórico do Cliente":
         st.stop()
 
     col_telefone = next((c for c in df.columns if "telefone" in c.lower()), None)
+    col_nome = next((c for c in df.columns if c.lower().strip() == "nome"), None)
+    col_servico = next((c for c in df.columns if "servi" in c.lower()), None)
+    col_condominio = next((c for c in df.columns if "condom" in c.lower()), None)
 
-    if telefone_busca and col_telefone:
-        digitos_busca = "".join(ch for ch in telefone_busca if ch.isdigit())
-        df_filtrado = df[df[col_telefone].astype(str).str.replace(r"\D", "", regex=True).str.contains(digitos_busca)]
-    else:
-        df_filtrado = df
+    # Mesmo padrão de limpar busca usado no Painel de Pacotes.
+    if st.session_state.get("_hist_limpar_busca"):
+        st.session_state["hist_busca"] = ""
+        st.session_state["_hist_limpar_busca"] = False
+
+    col_busca, col_limpar_busca = st.columns([4, 1])
+    with col_busca:
+        busca = st.text_input(
+            "🔎 Buscar por nome, telefone ou serviço",
+            placeholder="Ex: Maria, 11999999999 ou Banho P",
+            key="hist_busca",
+        )
+    with col_limpar_busca:
+        st.write("")
+        st.write("")
+        if st.button("🧹 Limpar busca", disabled=not busca, key="hist_limpar_botao"):
+            st.session_state["_hist_limpar_busca"] = True
+            st.rerun()
+
+    filtro_condominio = "Todos"
+    if col_condominio:
+        opcoes = ["Todos"] + sorted(df[col_condominio].dropna().unique().tolist())
+        filtro_condominio = st.selectbox("Filtrar por condomínio", opcoes, key="hist_condominio")
+
+    df_filtrado = df.copy()
+    if busca:
+        termo = busca.strip().lower()
+        termo_digitos = "".join(ch for ch in busca if ch.isdigit())
+        mascara = pd.Series(False, index=df_filtrado.index)
+        if col_nome:
+            mascara |= df_filtrado[col_nome].astype(str).str.lower().str.contains(termo, na=False, regex=False)
+        if col_telefone:
+            if termo_digitos:
+                mascara |= (
+                    df_filtrado[col_telefone].astype(str).str.replace(r"\D", "", regex=True)
+                    .str.contains(termo_digitos, na=False, regex=False)
+                )
+            else:
+                mascara |= df_filtrado[col_telefone].astype(str).str.lower().str.contains(termo, na=False, regex=False)
+        if col_servico:
+            mascara |= df_filtrado[col_servico].astype(str).str.lower().str.contains(termo, na=False, regex=False)
+        df_filtrado = df_filtrado[mascara]
+    if col_condominio and filtro_condominio != "Todos":
+        df_filtrado = df_filtrado[df_filtrado[col_condominio] == filtro_condominio]
+
+    if busca and df_filtrado.empty:
+        st.info(f"Nenhum resultado pra \"{busca}\".")
 
     st.dataframe(df_filtrado, use_container_width=True)
     st.caption(f"{len(df_filtrado)} registro(s).")
