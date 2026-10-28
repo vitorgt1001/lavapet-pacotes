@@ -235,6 +235,7 @@ if pagina == "📊 Painel de Pacotes":
     col_nome = next((c for c in df.columns if c.lower().strip() == "nome"), None)
     col_telefone = next((c for c in df.columns if "telefone" in c.lower()), None)
     col_pedido = next((c for c in df.columns if "pedido" in c.lower()), None)
+    col_nome_pet = next((c for c in df.columns if "nome do pet" in c.lower()), None)
 
     # Sua planilha tem várias linhas em branco pré-formatadas lá embaixo
     # (com fórmula de saldo mas sem cliente nenhum) — não contam como pacote.
@@ -289,6 +290,11 @@ if pagina == "📊 Painel de Pacotes":
 
     st.divider()
 
+    busca = st.text_input(
+        "🔎 Buscar por nome, telefone ou nome do pet",
+        placeholder="Ex: Neide, 11999999999 ou Bart",
+    )
+
     filtro_condominio = "Todos"
     if col_condominio:
         opcoes = ["Todos"] + sorted(df[col_condominio].dropna().unique().tolist())
@@ -297,12 +303,25 @@ if pagina == "📊 Painel de Pacotes":
     apenas_com_saldo = st.checkbox("Mostrar só quem tem saldo disponível", value=True)
 
     df_filtrado = df.copy()
+    if busca:
+        termo = busca.strip().lower()
+        mascara = pd.Series(False, index=df_filtrado.index)
+        if col_nome:
+            mascara |= df_filtrado[col_nome].astype(str).str.lower().str.contains(termo, na=False, regex=False)
+        if col_telefone:
+            mascara |= df_filtrado[col_telefone].astype(str).str.lower().str.contains(termo, na=False, regex=False)
+        if col_nome_pet:
+            mascara |= df_filtrado[col_nome_pet].astype(str).str.lower().str.contains(termo, na=False, regex=False)
+        df_filtrado = df_filtrado[mascara]
     if col_condominio and filtro_condominio != "Todos":
         df_filtrado = df_filtrado[df_filtrado[col_condominio] == filtro_condominio]
     if apenas_com_saldo and "Saldo" in df_filtrado.columns:
         df_filtrado = df_filtrado[df_filtrado["Saldo"] > 0]
 
-    colunas_exibir = [c for c in [col_nome, col_telefone, col_condominio, col_servico, col_qtd_comprada, col_qtd_usada, "Saldo", col_pedido] if c]
+    if busca and df_filtrado.empty:
+        st.info(f"Nenhum resultado pra \"{busca}\".")
+
+    colunas_exibir = [c for c in [col_nome, col_nome_pet, col_telefone, col_condominio, col_servico, col_qtd_comprada, col_qtd_usada, "Saldo", col_pedido] if c]
     st.dataframe(df_filtrado[colunas_exibir] if colunas_exibir else df_filtrado, use_container_width=True)
 
 
@@ -381,13 +400,21 @@ elif pagina == "➕ Novo Pacote":
 
     quantidades = {}
     sugestoes = {}
+    nomes_pet = {}
     if servicos_escolhidos:
-        st.caption("Quantidade comprada de cada serviço:")
+        st.caption(
+            "Quantidade comprada de cada serviço (e, se quiser, o nome do pet — útil "
+            "quando o cliente tem mais de um pacote pro mesmo serviço, ex: Banho P pra um "
+            "cachorro e Banho M pra outro):"
+        )
         colunas = st.columns(len(servicos_escolhidos))
         for col, servico in zip(colunas, servicos_escolhidos):
             with col:
                 quantidades[servico] = col.number_input(
                     servico, min_value=1, step=1, value=4, key=f"qtd_{servico}"
+                )
+                nomes_pet[servico] = col.text_input(
+                    "Nome do pet (opcional)", key=f"pet_{servico}", placeholder="Ex: Bart"
                 )
                 # Sugestão já com os 10% de desconto de pacote (preço
                 # avulso só pra visita única — comprando o pacote fechado
@@ -507,6 +534,7 @@ elif pagina == "➕ Novo Pacote":
                         "Telefone": telefone,
                         "Condomínio": condominio,
                         "Serviço": servico,
+                        "Nome do Pet": nomes_pet.get(servico, "").strip(),
                         "Qtd Comprada": qtd,
                         "Qtd Usada": 0,
                         "Valor Pago": valor_pago_servico,
@@ -623,6 +651,14 @@ elif pagina == "✅ Registrar Atendimento":
     pendentes_retro_por_telefone = st.session_state.setdefault("_ra_pendentes_retro", {})
     pendentes_retro_deste_cliente = pendentes_retro_por_telefone.get(digitos_tel, [])
 
+    # Desambiguação: quando o cliente tem mais de um pacote compatível com
+    # o serviço escolhido (ex: "Banho P" pro Bart e "Banho M" pro Romeu),
+    # guardamos aqui a escolha pendente (por telefone) até você confirmar
+    # qual pacote específico é esse atendimento — NADA é marcado na lista
+    # de pendentes enquanto essa escolha não for confirmada.
+    desambiguacao_por_telefone = st.session_state.setdefault("_ra_desambiguar", {})
+    desambiguacao_pendente = desambiguacao_por_telefone.get(digitos_tel)
+
     if pendentes_deste_cliente:
         # Lista e "remover item" ficam dentro do MESMO quadro (container com
         # borda), pra ficar visualmente claro que uma coisa pertence à
@@ -692,8 +728,76 @@ elif pagina == "✅ Registrar Atendimento":
                         pendentes_retro_por_telefone.pop(digitos_tel, None)
                     st.rerun()
 
+    # Quadro de desambiguação: aparece só quando o clique em "Marcar
+    # serviço" (mais abaixo) encontrou mais de um pacote candidato pra
+    # esse telefone + serviço. Enquanto estiver aberto, pede pra você
+    # escolher o pacote certo (porte + nome do pet, se tiver, + saldo)
+    # antes de marcar o item de verdade.
+    if desambiguacao_pendente:
+        with st.container(border=True):
+            st.markdown(
+                f"⚠️ **Esse cliente tem mais de um pacote pra \"{desambiguacao_pendente['servico']}\" "
+                "— qual deles é esse atendimento?**"
+            )
+            candidatos = desambiguacao_pendente["candidatos"]
+
+            def _rotulo_candidato(i):
+                c = candidatos[i]
+                partes = [c["servico"]]
+                if c.get("nomePet"):
+                    partes.append(f"pet: {c['nomePet']}")
+                if c.get("condominio"):
+                    partes.append(c["condominio"])
+                partes.append(f"saldo: {c['saldo']}")
+                return " — ".join(partes)
+
+            indice_escolhido = st.radio(
+                "Pacotes disponíveis",
+                options=list(range(len(candidatos))),
+                format_func=_rotulo_candidato,
+                key="ra_desambiguar_escolha",
+            )
+            col_confirmar, col_cancelar_desamb = st.columns(2)
+            with col_confirmar:
+                confirmar_desambiguacao = st.button("✅ Confirmar escolha", type="primary")
+            with col_cancelar_desamb:
+                cancelar_desambiguacao = st.button("Cancelar escolha")
+
+            if confirmar_desambiguacao:
+                candidato = candidatos[indice_escolhido]
+                servico_exato = candidato["servico"]
+                if desambiguacao_pendente["retroativo"]:
+                    pendentes_retro_por_telefone.setdefault(digitos_tel, []).append({
+                        "servico": servico_exato,
+                        "data": desambiguacao_pendente["data_reconciliacao"],
+                        "data_br": _data_br(desambiguacao_pendente["data_reconciliacao"]),
+                    })
+                    st.session_state["_ra_sucesso_msg"] = (
+                        f"\"{servico_exato}\" marcado como retroativo "
+                        f"({_data_br(desambiguacao_pendente['data_reconciliacao'])}) — ainda não gravei "
+                        "nada na planilha."
+                    )
+                else:
+                    pendentes_por_telefone.setdefault(digitos_tel, []).append(servico_exato)
+                    st.session_state["_ra_sucesso_msg"] = (
+                        f"\"{servico_exato}\" marcado nesta visita — ainda não gravei nada na planilha."
+                    )
+                desambiguacao_por_telefone.pop(digitos_tel, None)
+                st.rerun()
+
+            if cancelar_desambiguacao:
+                desambiguacao_por_telefone.pop(digitos_tel, None)
+                st.rerun()
+
     rotulo_botao_marcar = "Marcar serviço retroativo nesta visita" if retroativo else "Marcar serviço nesta visita"
-    enviar = st.button(rotulo_botao_marcar, type="primary")
+    enviar = st.button(
+        rotulo_botao_marcar,
+        type="primary",
+        disabled=bool(desambiguacao_pendente),
+        help=(
+            "Resolva a escolha de pacote acima antes de marcar outro serviço." if desambiguacao_pendente else None
+        ),
+    )
     finalizar = st.button(
         "✅ Registrar atendimento (sem enviar mensagem)",
         disabled=not telefone or not pendentes_deste_cliente,
@@ -766,43 +870,67 @@ elif pagina == "✅ Registrar Atendimento":
     if enviar:
         if not telefone:
             st.warning("Preencha o telefone do cliente.")
-        elif retroativo:
-            # Só marca aqui na tela (igual o fluxo normal) — nada é gravado
-            # na planilha ainda. Cada item guarda a PRÓPRIA data escolhida,
-            # então dá pra marcar serviços de datas retroativas diferentes
-            # antes de finalizar tudo de uma vez.
-            pendentes_retro_por_telefone.setdefault(digitos_tel, []).append(
-                {"servico": servico, "data": data_reconciliacao, "data_br": _data_br(data_reconciliacao)}
-            )
-            st.session_state["_ra_sucesso_msg"] = (
-                f"\"{servico}\" marcado como retroativo ({_data_br(data_reconciliacao)}) — ainda não "
-                "gravei nada na planilha. Clica em \"Finalizar lançamento retroativo\" quando "
-                "terminar de marcar tudo dessa visita passada."
-            )
-            st.rerun()
         else:
-            # Fluxo normal (não retroativo): NÃO grava nada na planilha
-            # ainda — só marca aqui na tela. A conferência de saldo abaixo é
-            # só um AVISO rápido (lê a planilha, mas não escreve nada); quem
-            # decide de verdade é o "Finalizar", que confere tudo de novo
-            # antes de gravar qualquer coisa.
-            ja_marcados_mesmo_servico = sum(1 for s in pendentes_deste_cliente if s == servico)
-            saldo_real = _saldo_disponivel_cliente(digitos_tel, servico, condominio)
-            if saldo_real is not None and (saldo_real - ja_marcados_mesmo_servico) <= 0:
-                st.warning(
-                    f"Esse cliente não parece ter mais saldo disponível pra \"{servico}\" "
-                    "(considerando o que já tá marcado nesta visita). Confere se ele não "
-                    "precisa de um pacote novo — ainda assim marquei o item na lista; o "
-                    "\"Finalizar\" confere de novo e, se realmente não tiver saldo, nada é "
-                    "gravado e ele te avisa."
+            # Antes de marcar o item, confere se tem mais de um pacote
+            # candidato pra esse telefone + serviço (ex: "Banho P" pro Bart
+            # e "Banho M" pro Romeu). Se tiver só 0 ou 1, marca igual sempre
+            # foi; se tiver 2+, abre o quadro de escolha acima em vez de
+            # marcar na hora. Se a chamada falhar por qualquer motivo (ex:
+            # Apps Script fora do ar), não bloqueia o fluxo — cai no
+            # comportamento de sempre, e quem decide de verdade continua
+            # sendo o "Finalizar".
+            candidatos = []
+            try:
+                resposta_candidatos = sheets.listar_candidatos_pacote(telefone, servico, condominio)
+                candidatos = resposta_candidatos.get("candidatos", [])
+            except Exception:
+                candidatos = []
+
+            if len(candidatos) >= 2:
+                desambiguacao_por_telefone[digitos_tel] = {
+                    "servico": servico,
+                    "candidatos": candidatos,
+                    "retroativo": retroativo,
+                    "data_reconciliacao": data_reconciliacao,
+                }
+                st.rerun()
+            elif retroativo:
+                # Só marca aqui na tela (igual o fluxo normal) — nada é gravado
+                # na planilha ainda. Cada item guarda a PRÓPRIA data escolhida,
+                # então dá pra marcar serviços de datas retroativas diferentes
+                # antes de finalizar tudo de uma vez.
+                pendentes_retro_por_telefone.setdefault(digitos_tel, []).append(
+                    {"servico": servico, "data": data_reconciliacao, "data_br": _data_br(data_reconciliacao)}
                 )
-            pendentes_por_telefone.setdefault(digitos_tel, []).append(servico)
-            st.session_state["_ra_sucesso_msg"] = (
-                f"\"{servico}\" marcado nesta visita — ainda não gravei nada na planilha. "
-                "Clica em \"Finalizar atendimento\" quando terminar de marcar tudo que o "
-                "cliente usou."
-            )
-            st.rerun()
+                st.session_state["_ra_sucesso_msg"] = (
+                    f"\"{servico}\" marcado como retroativo ({_data_br(data_reconciliacao)}) — ainda não "
+                    "gravei nada na planilha. Clica em \"Finalizar lançamento retroativo\" quando "
+                    "terminar de marcar tudo dessa visita passada."
+                )
+                st.rerun()
+            else:
+                # Fluxo normal (não retroativo): NÃO grava nada na planilha
+                # ainda — só marca aqui na tela. A conferência de saldo abaixo é
+                # só um AVISO rápido (lê a planilha, mas não escreve nada); quem
+                # decide de verdade é o "Finalizar", que confere tudo de novo
+                # antes de gravar qualquer coisa.
+                ja_marcados_mesmo_servico = sum(1 for s in pendentes_deste_cliente if s == servico)
+                saldo_real = _saldo_disponivel_cliente(digitos_tel, servico, condominio)
+                if saldo_real is not None and (saldo_real - ja_marcados_mesmo_servico) <= 0:
+                    st.warning(
+                        f"Esse cliente não parece ter mais saldo disponível pra \"{servico}\" "
+                        "(considerando o que já tá marcado nesta visita). Confere se ele não "
+                        "precisa de um pacote novo — ainda assim marquei o item na lista; o "
+                        "\"Finalizar\" confere de novo e, se realmente não tiver saldo, nada é "
+                        "gravado e ele te avisa."
+                    )
+                pendentes_por_telefone.setdefault(digitos_tel, []).append(servico)
+                st.session_state["_ra_sucesso_msg"] = (
+                    f"\"{servico}\" marcado nesta visita — ainda não gravei nada na planilha. "
+                    "Clica em \"Finalizar atendimento\" quando terminar de marcar tudo que o "
+                    "cliente usou."
+                )
+                st.rerun()
 
     if finalizar:
         # Grava cada item da lista, um de cada vez (igual o lançamento
@@ -940,6 +1068,7 @@ elif pagina == "✅ Registrar Atendimento":
     if cancelar_pendente:
         pendentes_por_telefone.pop(digitos_tel, None)
         pendentes_retro_por_telefone.pop(digitos_tel, None)
+        desambiguacao_por_telefone.pop(digitos_tel, None)
         st.session_state["_ra_sucesso_msg"] = (
             "Cancelado — como nada tinha sido gravado na planilha, não sobrou nada pra desfazer."
         )
