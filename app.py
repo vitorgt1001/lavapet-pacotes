@@ -632,10 +632,15 @@ elif pagina == "✅ Registrar Atendimento":
     # desenhado na tela nessa mesma rodada, só dá erro "cannot be modified
     # after the widget...". Por isso a limpeza acontece aqui em cima, numa
     # rodada seguinte, marcada pela flag "_ra_limpar" lá no final do envio).
-    # Só limpamos a tela depois de FINALIZAR (ou cancelar) a visita, ou
-    # lançar um retroativo — marcar um serviço avulso NÃO limpa mais o
-    # telefone, porque normalmente você vai marcar mais de um serviço
-    # seguido pro mesmo cliente antes de finalizar a visita.
+    #
+    # ATUALIZADO 28/10/2026: só limpamos o telefone depois de CANCELAR os
+    # itens marcados (você explicitamente disse "esquece esse cliente").
+    # "Registrar atendimento" e "Finalizar lançamento retroativo" NÃO
+    # limpam mais — antes limpavam, e isso desabilitava os botões "Ver
+    # resumo" / "Enviar resumo pro cliente" bem no momento em que a
+    # mensagem de sucesso pedia pra você clicar neles (eles dependem do
+    # campo Telefone estar preenchido). Agora o telefone só é trocado
+    # quando você mesmo digita um novo, pro próximo cliente.
     if st.session_state.get("_ra_limpar"):
         st.session_state["ra_telefone"] = ""
         st.session_state["ra_condominio"] = ""
@@ -1084,7 +1089,12 @@ elif pagina == "✅ Registrar Atendimento":
                 "Registrado na planilha: " + ", ".join(sucesso) + ". Nenhuma mensagem foi "
                 "enviada ainda — use \"Enviar resumo pro cliente\" quando quiser."
             )
-            st.session_state["_ra_limpar"] = True
+            # NÃO limpa o telefone aqui (ver "_ra_limpar" mais acima) — se
+            # limpasse, os botões "Ver resumo" / "Enviar resumo pro
+            # cliente" ficariam desabilitados logo depois do sucesso,
+            # bem na hora que a mensagem acima pede pra você clicar
+            # neles. O telefone só fica preenchido até você digitar um
+            # telefone novo pra atender o próximo cliente.
         else:
             if sucesso:
                 st.session_state["_ra_sucesso_msg"] = "Registrado: " + ", ".join(sucesso) + "."
@@ -1166,7 +1176,9 @@ elif pagina == "✅ Registrar Atendimento":
                 "mensagem foi enviada — se quiser avisar o cliente, use \"Enviar resumo pro "
                 "cliente\" quando quiser (é opcional)."
             )
-            st.session_state["_ra_limpar"] = True
+            # Mesmo motivo do "finalizar" normal: não limpa o telefone
+            # aqui, senão os botões de "Enviar resumo" ficam desabilitados
+            # bem na hora que você mais provavelmente vai querer usá-los.
         else:
             if sucesso:
                 st.session_state["_ra_sucesso_msg"] = "Gravado: " + ", ".join(sucesso) + "."
