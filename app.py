@@ -395,7 +395,6 @@ elif pagina == "➕ Novo Pacote":
         )
         condominio = st.selectbox("Condomínio", catalogo.CONDOMINIOS, key="np_condominio")
     with c2:
-        porte = st.selectbox("Porte (referência, pra sugestão de preço)", catalogo.PORTES)
         data_compra = st.date_input("Data da compra", value=dt.date.today())
 
     if cliente_existente:
@@ -442,7 +441,6 @@ elif pagina == "➕ Novo Pacote":
                     portes_por_servico[servico] = col.selectbox(
                         "Porte deste serviço",
                         catalogo.PORTES,
-                        index=catalogo.PORTES.index(porte),
                         key=f"porte_{servico}",
                     )
                 else:
@@ -453,9 +451,10 @@ elif pagina == "➕ Novo Pacote":
                 # Sugestão já com os 10% de desconto de pacote (preço
                 # avulso só pra visita única — comprando o pacote fechado
                 # sai mais barato por visita, igual já é calculado na
-                # planilha). Usa o porte ESPECÍFICO desse serviço quando
-                # ele existir, senão cai no porte de referência geral.
-                porte_deste_servico = portes_por_servico[servico] or porte
+                # planilha). Usa o porte escolhido ACIMA, pra esse
+                # serviço especificamente (None pra serviço de preço fixo,
+                # que não usa porte pra nada).
+                porte_deste_servico = portes_por_servico[servico]
                 sugestao_unit = catalogo.preco_sugerido_pacote(condominio, servico, porte_deste_servico) or 0
                 sugestoes[servico] = round(sugestao_unit * quantidades[servico], 2)
                 col.caption(f"Sugestão (c/ 10% de pacote): R$ {sugestoes[servico]:.2f}")
@@ -493,9 +492,8 @@ elif pagina == "➕ Novo Pacote":
         for servico in servicos:
             qtd = int(quantidades[servico])
             porte_servico = portes_por_servico.get(servico)
-            porte_calculo = porte_servico or porte
-            preco_avulso = catalogo.preco_sugerido(condominio, servico, porte_calculo) or 0
-            preco_c_desconto = catalogo.preco_sugerido_pacote(condominio, servico, porte_calculo) or 0
+            preco_avulso = catalogo.preco_sugerido(condominio, servico, porte_servico) or 0
+            preco_c_desconto = catalogo.preco_sugerido_pacote(condominio, servico, porte_servico) or 0
             if soma_sugerida > 0:
                 peso = sugestoes[servico] / peso_total
             else:
