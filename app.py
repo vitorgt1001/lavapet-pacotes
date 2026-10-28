@@ -290,10 +290,27 @@ if pagina == "📊 Painel de Pacotes":
 
     st.divider()
 
-    busca = st.text_input(
-        "🔎 Buscar por nome, telefone ou nome do pet",
-        placeholder="Ex: Neide, 11999999999 ou Bart",
-    )
+    # Limpa a busca ANTES de desenhar o campo (mesma regra do Streamlit já
+    # usada em "Registrar Atendimento" — não dá pra mudar o valor de um
+    # widget com key definida DEPOIS que ele já foi desenhado na tela
+    # nessa mesma rodada).
+    if st.session_state.get("_painel_limpar_busca"):
+        st.session_state["painel_busca"] = ""
+        st.session_state["_painel_limpar_busca"] = False
+
+    col_busca, col_limpar_busca = st.columns([4, 1])
+    with col_busca:
+        busca = st.text_input(
+            "🔎 Buscar por nome, telefone ou nome do pet",
+            placeholder="Ex: Maria, 11999999999 ou Rex",
+            key="painel_busca",
+        )
+    with col_limpar_busca:
+        st.write("")
+        st.write("")
+        if st.button("🧹 Limpar busca", disabled=not busca):
+            st.session_state["_painel_limpar_busca"] = True
+            st.rerun()
 
     filtro_condominio = "Todos"
     if col_condominio:
@@ -401,11 +418,15 @@ elif pagina == "➕ Novo Pacote":
     quantidades = {}
     sugestoes = {}
     nomes_pet = {}
+    portes_por_servico = {}
     if servicos_escolhidos:
         st.caption(
-            "Quantidade comprada de cada serviço (e, se quiser, o nome do pet — útil "
+            "Quantidade comprada de cada serviço. Pra serviços com preço por porte (Banho, "
+            "Tosa Completa Máquina/Tesoura), escolhe o porte do pet aqui também — é o que vai "
+            "ser gravado junto do nome do serviço na planilha (ex: \"Banho P\"), pra diferenciar "
+            "certinho de um \"Banho M\" do mesmo cliente. E, se quiser, o nome do pet — útil "
             "quando o cliente tem mais de um pacote pro mesmo serviço, ex: Banho P pra um "
-            "cachorro e Banho M pra outro):"
+            "cachorro e Banho M pra outro:"
         )
         colunas = st.columns(len(servicos_escolhidos))
         for col, servico in zip(colunas, servicos_escolhidos):
@@ -413,14 +434,29 @@ elif pagina == "➕ Novo Pacote":
                 quantidades[servico] = col.number_input(
                     servico, min_value=1, step=1, value=4, key=f"qtd_{servico}"
                 )
+                # Só pede porte pra serviços cujo preço realmente muda por
+                # porte (catalogo.servico_varia_por_porte) — pra serviços
+                # de preço fixo (ex: Tosa Higiênica), gravar um porte
+                # junto do nome não faria sentido nenhum.
+                if catalogo.servico_varia_por_porte(servico):
+                    portes_por_servico[servico] = col.selectbox(
+                        "Porte deste serviço",
+                        catalogo.PORTES,
+                        index=catalogo.PORTES.index(porte),
+                        key=f"porte_{servico}",
+                    )
+                else:
+                    portes_por_servico[servico] = None
                 nomes_pet[servico] = col.text_input(
                     "Nome do pet (opcional)", key=f"pet_{servico}", placeholder="Ex: Bart"
                 )
                 # Sugestão já com os 10% de desconto de pacote (preço
                 # avulso só pra visita única — comprando o pacote fechado
                 # sai mais barato por visita, igual já é calculado na
-                # planilha).
-                sugestao_unit = catalogo.preco_sugerido_pacote(condominio, servico, porte) or 0
+                # planilha). Usa o porte ESPECÍFICO desse serviço quando
+                # ele existir, senão cai no porte de referência geral.
+                porte_deste_servico = portes_por_servico[servico] or porte
+                sugestao_unit = catalogo.preco_sugerido_pacote(condominio, servico, porte_deste_servico) or 0
                 sugestoes[servico] = round(sugestao_unit * quantidades[servico], 2)
                 col.caption(f"Sugestão (c/ 10% de pacote): R$ {sugestoes[servico]:.2f}")
     else:
@@ -436,7 +472,7 @@ elif pagina == "➕ Novo Pacote":
         help="Preenchido com a soma das sugestões acima — ajuste se teve desconto ou valor diferente.",
     )
 
-    def _calcular_alocacao(servicos, quantidades, sugestoes, soma_sugerida, valor_pago_total):
+    def _calcular_alocacao(servicos, quantidades, sugestoes, soma_sugerida, valor_pago_total, portes_por_servico):
         """
         Divide o valor total pago entre os serviços da compra, na mesma
         proporção da sugestão de preço de cada um (ex: se Banho sugeriu
@@ -445,21 +481,31 @@ elif pagina == "➕ Novo Pacote":
         é a mesma conta usada tanto pra mostrar a memória de cálculo na
         tela quanto pra gravar na planilha, então o que você vê aqui é
         exatamente o que vai ser salvo.
+
+        O campo "Serviço" de cada linha já sai com o porte junto quando
+        aplicável (ex: "Banho P") — é esse texto que vai pra coluna
+        Serviço da planilha, e é ele que permite diferenciar dois pacotes
+        do mesmo cliente pro mesmo serviço genérico (ex: Banho P x Banho
+        M) na hora de registrar atendimento depois.
         """
         peso_total = soma_sugerida if soma_sugerida > 0 else sum(quantidades.values())
         linhas = []
         for servico in servicos:
             qtd = int(quantidades[servico])
-            preco_avulso = catalogo.preco_sugerido(condominio, servico, porte) or 0
-            preco_c_desconto = catalogo.preco_sugerido_pacote(condominio, servico, porte) or 0
+            porte_servico = portes_por_servico.get(servico)
+            porte_calculo = porte_servico or porte
+            preco_avulso = catalogo.preco_sugerido(condominio, servico, porte_calculo) or 0
+            preco_c_desconto = catalogo.preco_sugerido_pacote(condominio, servico, porte_calculo) or 0
             if soma_sugerida > 0:
                 peso = sugestoes[servico] / peso_total
             else:
                 peso = (qtd / peso_total) if peso_total else 0
             valor_pago_servico = round(valor_pago_total * peso, 2)
             valor_unitario = round(valor_pago_servico / qtd, 2) if qtd else 0
+            servico_rotulo = f"{servico} {porte_servico}" if porte_servico else servico
             linhas.append({
-                "Serviço": servico,
+                "Serviço": servico_rotulo,
+                "_servico_generico": servico,
                 "Qtd": qtd,
                 "Preço avulso (un.)": preco_avulso,
                 "Preço c/ desconto (un.)": preco_c_desconto,
@@ -470,7 +516,7 @@ elif pagina == "➕ Novo Pacote":
         return linhas
 
     alocacao = (
-        _calcular_alocacao(servicos_escolhidos, quantidades, sugestoes, soma_sugerida, valor_pago_total)
+        _calcular_alocacao(servicos_escolhidos, quantidades, sugestoes, soma_sugerida, valor_pago_total, portes_por_servico)
         if servicos_escolhidos
         else []
     )
@@ -478,8 +524,12 @@ elif pagina == "➕ Novo Pacote":
     if alocacao:
         st.caption("📋 Memória de cálculo — é isso que vai ser gravado na planilha:")
         df_memoria = pd.DataFrame(alocacao)
+        colunas_memoria = [
+            "Serviço", "Qtd", "Preço avulso (un.)", "Preço c/ desconto (un.)",
+            "% do total pago", "Valor pago (alocado)", "Valor unitário final",
+        ]
         st.dataframe(
-            df_memoria.style.format({
+            df_memoria[colunas_memoria].style.format({
                 "Preço avulso (un.)": "R$ {:.2f}",
                 "Preço c/ desconto (un.)": "R$ {:.2f}",
                 "% do total pago": "{:.1f}%",
@@ -525,6 +575,7 @@ elif pagina == "➕ Novo Pacote":
                 id_pedido = f"PED-{dt.datetime.now():%Y%m%d%H%M%S}"
 
                 for linha in alocacao:
+                    servico_generico = linha["_servico_generico"]
                     servico = linha["Serviço"]
                     qtd = linha["Qtd"]
                     valor_pago_servico = linha["Valor pago (alocado)"]
@@ -534,7 +585,7 @@ elif pagina == "➕ Novo Pacote":
                         "Telefone": telefone,
                         "Condomínio": condominio,
                         "Serviço": servico,
-                        "Nome do Pet": nomes_pet.get(servico, "").strip(),
+                        "Nome do Pet": nomes_pet.get(servico_generico, "").strip(),
                         "Qtd Comprada": qtd,
                         "Qtd Usada": 0,
                         "Valor Pago": valor_pago_servico,
