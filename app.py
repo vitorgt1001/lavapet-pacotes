@@ -539,6 +539,17 @@ elif pagina == "➕ Novo Pacote":
         )
         st.caption(f"Total pago: R$ {sum(l['Valor pago (alocado)'] for l in alocacao):.2f}")
 
+    # Confirmação bem visível, logo ACIMA do botão, mostrando de novo Nome
+    # e Telefone — a "Memória de cálculo" acima nunca mostrava esses dois
+    # campos, só os valores. Isso importa porque o autopreenchimento do
+    # navegador às vezes troca sozinho o que tá escrito num campo de texto
+    # (ex: sugere um nome antigo salvo no navegador em vez do que você
+    # acabou de digitar) — já aconteceu mais de uma vez aqui com o campo
+    # Nome. Essa caixa mostra EXATAMENTE o que vai ser gravado, pra você
+    # conferir uma última vez antes de clicar.
+    if nome or telefone:
+        st.warning(f"⚠️ Confere antes de cadastrar — vai gravar como: **{nome or '(sem nome)'}** — tel. **{telefone or '(sem telefone)'}** — {condominio}")
+
     enviar = st.button("Cadastrar pacote", type="primary")
 
     if enviar:
