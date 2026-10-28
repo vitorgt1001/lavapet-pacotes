@@ -637,6 +637,13 @@ elif pagina == "✅ Registrar Atendimento":
         st.success(st.session_state.pop("_ra_sucesso_msg"))
     if st.session_state.get("_ra_aviso_msg"):
         st.warning(st.session_state.pop("_ra_aviso_msg"))
+    # Aviso técnico discreto: se a checagem de "mais de um pacote" (que
+    # decide se mostra a tela de escolha) falhou por baixo dos panos, fica
+    # registrado aqui — não trava o fluxo, mas ajuda a identificar o
+    # motivo (ex: Apps Script com versão antiga implantada) em vez de só
+    # cair silenciosamente no comportamento antigo.
+    if st.session_state.get("_ra_erro_candidatos"):
+        st.caption(f"⚙️ (técnico) A checagem de pacotes duplicados falhou: {st.session_state['_ra_erro_candidatos']}")
 
     # Limpa os campos ANTES de criar os widgets (igual o Streamlit exige —
     # não dá pra mudar st.session_state de um campo DEPOIS que ele já foi
@@ -1010,8 +1017,15 @@ elif pagina == "✅ Registrar Atendimento":
             try:
                 resposta_candidatos = sheets.listar_candidatos_pacote(telefone, servico, condominio)
                 candidatos = resposta_candidatos.get("candidatos", [])
-            except Exception:
+                st.session_state.pop("_ra_erro_candidatos", None)
+            except Exception as e:
                 candidatos = []
+                # Guarda o erro só pra mostrar como aviso discreto — não
+                # trava o fluxo (o "Finalizar" confere tudo de novo), mas
+                # ajuda a descobrir SE e POR QUE a checagem de pacotes
+                # duplicados não está funcionando (ex: Apps Script com
+                # versão antiga ainda implantada).
+                st.session_state["_ra_erro_candidatos"] = str(e)
 
             if len(candidatos) >= 2:
                 desambiguacao_por_telefone[digitos_tel] = {
