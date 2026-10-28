@@ -14,6 +14,12 @@ engano o preço da Vila 11 Pinheiros. São dois condomínios DIFERENTES, com
 tabelas de preço diferentes. Confirmado com a Patricia (cliente) e com o
 Marco: Vila Mariana usa a MESMA tabela da Ventana (Banho 59/79/99/119,
 Tosa Completa Tesoura 149/179/209, com SpaPet).
+
+ATUALIZADO 28/10/2026: nova função servico_varia_por_porte(), usada pelo
+app.py em "Novo Pacote" pra saber se deve pedir o porte do pet (e gravar
+junto do nome do serviço na planilha, ex: "Banho P") ou não (serviços como
+Tosa Higiênica custam o mesmo não importa o porte, então não faz sentido
+gravar porte junto do nome deles).
 """
 
 CONDOMINIOS = [
@@ -117,3 +123,21 @@ def preco_sugerido_pacote(condominio, servico, porte):
     if preco_avulso is None:
         return None
     return round(preco_avulso * DESCONTO_PACOTE, 2)
+
+
+def servico_varia_por_porte(servico):
+    """
+    True se esse serviço tem preço diferente dependendo do porte do pet
+    (ex: Banho tem P/M/G/GG com preços diferentes). False pra serviços de
+    preço fixo, tipo Tosa Higiênica ou Escovação de Dente, que custam o
+    mesmo não importa o porte.
+
+    Olha a PRIMEIRA tabela de condomínio onde esse serviço aparece (a
+    estrutura — fixo vs. por porte — é a mesma em todos os condomínios
+    pra um dado serviço, só o valor em si muda).
+    """
+    for tabela in PRECOS_REFERENCIA.values():
+        valor = tabela.get(servico)
+        if valor is not None:
+            return isinstance(valor, dict)
+    return False
