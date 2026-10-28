@@ -160,6 +160,19 @@ def _mapear_valores_por_cabecalho(aba, valores_por_nome_coluna: dict):
     return linha
 
 
+def _coluna_existe(aba, nome_coluna: str) -> bool:
+    """
+    Confere se a aba já tem uma coluna com esse texto exato de cabeçalho
+    (ignorando maiúscula/minúscula e espaços nas pontas) — usada pra
+    campos OPCIONAIS como "Nome do Pet", que só devem ser gravados se
+    Marco já tiver criado a coluna na planilha (senão cai no erro de
+    "coluna não encontrada" de _mapear_valores_por_cabecalho).
+    """
+    cabecalho = aba.row_values(1)
+    chave = nome_coluna.strip().lower()
+    return any((c or "").strip().lower() == chave for c in cabecalho)
+
+
 def _herdar_formulas_da_linha_anterior(aba, numero_linha_nova):
     """
     Sua planilha calcula 'Saldo' com fórmula em cada linha — a coluna G
@@ -204,9 +217,19 @@ def cadastrar_novo_pacote(dados: dict):
 
     Colunas de fórmula (como 'Saldo') não precisam vir nesse dict — são
     preenchidas automaticamente com a fórmula certa.
+
+    Se "Nome do Pet" vier no dict mas a coluna ainda não existir na
+    planilha, esse campo é simplesmente ignorado (em vez de dar erro) —
+    assim o cadastro continua funcionando normalmente mesmo antes de você
+    criar a coluna; depois de criada, passa a ser gravado.
     """
     aba = _worksheet(ABA_PACOTES)
-    linha = _mapear_valores_por_cabecalho(aba, dados)
+
+    dados_filtrados = dict(dados)
+    if "Nome do Pet" in dados_filtrados and not _coluna_existe(aba, "Nome do Pet"):
+        dados_filtrados.pop("Nome do Pet")
+
+    linha = _mapear_valores_por_cabecalho(aba, dados_filtrados)
 
     # NÃO usamos aba.append_row() aqui de propósito: como a planilha tem
     # centenas de linhas em branco com só uma caixinha marcada na coluna
@@ -263,6 +286,26 @@ def registrar_atendimento(telefone, servico, condominio="", data_reconciliacao="
         servico=servico,
         condominio=condominio,
         dataReconciliacao=data_reconciliacao,
+    )
+
+
+def listar_candidatos_pacote(telefone, servico, condominio=""):
+    """
+    Devolve a lista de pacotes desse telefone que têm saldo disponível pro
+    serviço informado (ex: "Banho" encontra tanto "Banho P" quanto "Banho
+    M"), cada um com o texto exato da coluna Serviço, nome do pet (se a
+    coluna existir e estiver preenchida) e saldo restante.
+
+    Usada em "Registrar Atendimento" ANTES de marcar um serviço: se vier
+    mais de um candidato, o app mostra a lista pra você escolher qual
+    pacote específico é esse atendimento (em vez do Apps Script escolher
+    sozinho o primeiro com saldo).
+    """
+    return chamar_api_apps_script(
+        "listar_candidatos_pacote",
+        telefone=telefone,
+        servico=servico,
+        condominio=condominio,
     )
 
 
