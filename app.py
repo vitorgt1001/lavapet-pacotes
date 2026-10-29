@@ -236,6 +236,7 @@ if pagina == "📊 Painel de Pacotes":
     col_telefone = next((c for c in df.columns if "telefone" in c.lower()), None)
     col_pedido = next((c for c in df.columns if "pedido" in c.lower()), None)
     col_nome_pet = next((c for c in df.columns if "nome do pet" in c.lower()), None)
+    col_data_compra = next((c for c in df.columns if "data" in c.lower() and "compra" in c.lower()), None)
 
     # Sua planilha tem várias linhas em branco pré-formatadas lá embaixo
     # (com fórmula de saldo mas sem cliente nenhum) — não contam como pacote.
@@ -338,7 +339,7 @@ if pagina == "📊 Painel de Pacotes":
     if busca and df_filtrado.empty:
         st.info(f"Nenhum resultado pra \"{busca}\".")
 
-    colunas_exibir = [c for c in [col_nome, col_nome_pet, col_telefone, col_condominio, col_servico, col_qtd_comprada, col_qtd_usada, "Saldo", col_pedido] if c]
+    colunas_exibir = [c for c in [col_nome, col_nome_pet, col_telefone, col_condominio, col_servico, col_qtd_comprada, col_qtd_usada, "Saldo", col_data_compra, col_pedido] if c]
     st.dataframe(df_filtrado[colunas_exibir] if colunas_exibir else df_filtrado, use_container_width=True)
 
 
@@ -379,7 +380,11 @@ elif pagina == "➕ Novo Pacote":
     # apagava sozinho o nome que você tinha acabado de digitar, assim que
     # terminava de digitar o telefone — por isso às vezes parecia que
     # "sumia" o nome mesmo com o campo visualmente preenchido antes.
-    if cliente_existente and st.session_state.get("_np_tel_autofill") != digitos_tel:
+    # Mesmo ajuste da tela "Registrar Atendimento": tenta preencher o
+    # Condomínio sozinho toda vez que o campo estiver vazio, não só na
+    # primeira vez que reconhece esse telefone na sessão.
+    condominio_atual_np = st.session_state.get("np_condominio", "")
+    if cliente_existente and (st.session_state.get("_np_tel_autofill") != digitos_tel or not condominio_atual_np):
         if cliente_existente["nome"]:
             st.session_state["np_nome"] = cliente_existente["nome"]
         condominio_canonico = _condominio_canonico(cliente_existente["condominio"])
@@ -738,7 +743,14 @@ elif pagina == "✅ Registrar Atendimento":
     digitos_tel = "".join(ch for ch in telefone_digitado if ch.isdigit())
     cliente_existente = _buscar_cliente_por_telefone(digitos_tel) if len(digitos_tel) >= 8 else None
 
-    if cliente_existente and st.session_state.get("_ra_tel_autofill") != digitos_tel:
+    # ATUALIZADO: antes só tentava preencher o Condomínio sozinho UMA vez
+    # por telefone, na sessão inteira — se desse errado (ou se o campo
+    # ficasse vazio por qualquer motivo depois), não tentava de novo. Agora
+    # tenta de novo toda vez que o campo estiver vazio, mesmo que já tenha
+    # tentado antes pra esse telefone — só não mexe se você já escolheu
+    # algum condomínio na mão (campo não fica vazio nesse caso).
+    condominio_atual_ra = st.session_state.get("ra_condominio", "")
+    if cliente_existente and (st.session_state.get("_ra_tel_autofill") != digitos_tel or not condominio_atual_ra):
         condominio_canonico = _condominio_canonico(cliente_existente["condominio"])
         if condominio_canonico:
             st.session_state["ra_condominio"] = condominio_canonico
@@ -956,11 +968,21 @@ elif pagina == "✅ Registrar Atendimento":
         "o cliente não precisa ficar sabendo). Se não tiver nada pendente de envio, o app avisa "
         "e não manda nada."
     )
-    col_ver, col_enviar = st.columns(2)
+    col_ver, col_enviar, col_limpar_fila = st.columns(3)
     with col_ver:
         ver_resumo = st.button("👀 Ver resumo antes de enviar", disabled=not telefone)
     with col_enviar:
         enviar_resumo = st.button("📨 Enviar resumo pro cliente agora", disabled=not telefone)
+    with col_limpar_fila:
+        limpar_fila = st.button(
+            "🧹 Limpar fila sem enviar",
+            disabled=not telefone,
+            help=(
+                "Apaga o que estiver acumulado nessa fila de mensagem (do lado do Apps "
+                "Script) SEM mandar nada pro cliente. Use se a prévia estiver com itens "
+                "repetidos ou de testes antigos que não deveriam estar ali."
+            ),
+        )
 
     # Guarda o texto visualizado por telefone, pra continuar mostrando na
     # tela mesmo depois do rerun que o botão "Ver resumo" dispara (sem
@@ -1144,6 +1166,23 @@ elif pagina == "✅ Registrar Atendimento":
         except Exception as e:
             formatar_erro(e)
 
+    if limpar_fila:
+        try:
+            resultado = sheets.cancelar_atendimento_pendente(telefone)
+            resumo_visualizado_por_telefone.pop(digitos_tel, None)
+            resumo_vazio_por_telefone.pop(digitos_tel, None)
+            if resultado.get("cancelado"):
+                st.session_state["_ra_sucesso_msg"] = (
+                    "Fila de mensagem limpa — nada foi enviado pro cliente."
+                )
+            else:
+                st.session_state["_ra_sucesso_msg"] = (
+                    resultado.get("motivo") or "Não tinha nada na fila pra limpar."
+                )
+            st.rerun()
+        except Exception as e:
+            formatar_erro(e)
+
     if enviar_resumo:
         try:
             resultado = sheets.finalizar_atendimento(telefone)
@@ -1230,6 +1269,16 @@ elif pagina == "✅ Registrar Atendimento":
 elif pagina == "📜 Histórico do Cliente":
     st.header("📜 Histórico do Cliente")
 
+    # Mesma regra de sempre: um widget com key não pode ser alterado depois
+    # de já ter sido desenhado na tela nesse mesmo rodada — por isso a
+    # "desmarcada" do checkbox de confirmação acontece aqui em cima, numa
+    # rodada seguinte, e não no meio do tratamento do botão de estorno.
+    if st.session_state.get("_hist_estorno_limpar"):
+        st.session_state["hist_estorno_confirmar"] = False
+        st.session_state["_hist_estorno_limpar"] = False
+    if st.session_state.get("_hist_estorno_sucesso_msg"):
+        st.success(st.session_state.pop("_hist_estorno_sucesso_msg"))
+
     try:
         df = sheets.ler_historico_df()
     except Exception as e:
@@ -1295,3 +1344,55 @@ elif pagina == "📜 Histórico do Cliente":
 
     st.dataframe(df_filtrado, use_container_width=True)
     st.caption(f"{len(df_filtrado)} registro(s).")
+
+    st.divider()
+    with st.expander("↩️ Desfazer um atendimento já registrado"):
+        st.caption(
+            "Reverte um atendimento específico: devolve 1 no saldo do pacote (Qtd Usada -1) "
+            "e apaga essa linha do Histórico. NÃO manda mensagem nenhuma pro cliente. Use com "
+            "cuidado — essa ação não tem \"desfazer o desfazer\"."
+        )
+        col_data_hora = next((c for c in df.columns if "data" in c.lower() and "hora" in c.lower()), None)
+        if not col_data_hora or df_filtrado.empty:
+            st.caption(
+                "Nenhum registro na lista filtrada acima (ou não achei a coluna 'Data e "
+                "Hora') pra escolher."
+            )
+        else:
+            opcoes_estorno = df_filtrado.index.tolist()
+
+            def _rotulo_estorno(i, _df=df_filtrado):
+                linha = _df.loc[i]
+                nome_txt = str(linha.get(col_nome, "")) if col_nome else ""
+                return (
+                    f"{linha.get(col_data_hora, '')} — {nome_txt} — "
+                    f"{linha.get(col_servico, '')}"
+                )
+
+            indice_estorno = st.selectbox(
+                "Escolhe o atendimento pra desfazer",
+                options=opcoes_estorno,
+                format_func=_rotulo_estorno,
+                key="hist_estorno_escolha",
+            )
+            linha_escolhida = df_filtrado.loc[indice_estorno]
+            confirmar_estorno = st.checkbox(
+                "Confirmo que quero desfazer esse atendimento", key="hist_estorno_confirmar"
+            )
+            if st.button(
+                "↩️ Desfazer este atendimento", disabled=not confirmar_estorno, type="primary"
+            ):
+                try:
+                    resultado = sheets.estornar_atendimento(
+                        telefone=str(linha_escolhida.get(col_telefone, "")) if col_telefone else "",
+                        servico=str(linha_escolhida.get(col_servico, "")) if col_servico else "",
+                        data_hora=str(linha_escolhida.get(col_data_hora, "")),
+                    )
+                    st.session_state["_hist_estorno_limpar"] = True
+                    st.session_state["_hist_estorno_sucesso_msg"] = (
+                        f"Estornado! Novo saldo de \"{resultado.get('servico')}\": "
+                        f"{resultado.get('novoSaldo')} (usado: {resultado.get('novaQtdUsada')})."
+                    )
+                    st.rerun()
+                except Exception as e:
+                    formatar_erro(e)
