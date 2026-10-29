@@ -351,6 +351,27 @@ def finalizar_visita_completa(telefone, condominio, servicos):
     )
 
 
+def estornar_atendimento(telefone, servico, data_hora):
+    """
+    Desfaz um atendimento específico já registrado: devolve 1 no saldo do
+    pacote (Qtd Usada -1, Saldo +1) e apaga a linha correspondente do
+    Historico_Pacotes. NÃO manda mensagem nenhuma pro cliente.
+
+    Usada pelo botão "↩️ Desfazer este atendimento" na tela "Histórico do
+    Cliente". Identifica a linha exata a desfazer por telefone + texto
+    EXATO do serviço (ex: "Banho P", igual está gravado na planilha) +
+    texto EXATO da coluna "Data e Hora" do Historico_Pacotes — por isso
+    sempre escolhe o registro certo na lista antes de confirmar, em vez de
+    digitar esses valores na mão.
+    """
+    return chamar_api_apps_script(
+        "estornar_atendimento",
+        telefone=telefone,
+        servico=servico,
+        dataHora=data_hora,
+    )
+
+
 def cancelar_atendimento_pendente(telefone):
     """
     Apaga a fila de serviços pendentes desse telefone (do lado do Apps
