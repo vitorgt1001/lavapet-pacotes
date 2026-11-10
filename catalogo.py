@@ -20,14 +20,28 @@ app.py em "Novo Pacote" pra saber se deve pedir o porte do pet (e gravar
 junto do nome do serviço na planilha, ex: "Banho P") ou não (serviços como
 Tosa Higiênica custam o mesmo não importa o porte, então não faz sentido
 gravar porte junto do nome deles).
+
+ATUALIZADO 10/11/2026: renomeação do grupo "Vila 11" — o prefixo
+compartilhado "Vila 11 X" virou sufixo "X Vila 11" (sugestão da Patricia,
+pra parar de confundir o bot de WhatsApp quando o grupo virou 4 sub-
+condomínios). Nomes antigos -> novos:
+  "Vila 11 Pinheiros"    -> "Pinheiros Vila 11"
+  "Vila Mariana"         -> "Vila Mariana Vila 11"
+  "Vila 11 Frei Caneca"  -> "Frei Caneca Vila 11"  (NOVO no catálogo)
+  "Vila 11 Melo Alves"   -> "Melo Alves Vila 11"   (NOVO no catálogo)
+Frei Caneca Vila 11 e Melo Alves Vila 11 nunca tinham entrado nesse
+catálogo antes — preços trazidos da aba Tabela_Precos da planilha
+(linhas "Vila 11 Frei Caneca|..." e "Vila 11 Melo Alves|...").
 """
 
 CONDOMINIOS = [
     "Humanari",
-    "Vivaz Rio Bonito",
-    "Vila 11 Pinheiros",
-    "Vila Mariana",
     "Ventana",
+    "Frei Caneca Vila 11",
+    "Melo Alves Vila 11",
+    "Pinheiros Vila 11",
+    "Vila Mariana Vila 11",
+    "Vivaz Rio Bonito",
 ]
 
 SERVICOS = [
@@ -38,7 +52,7 @@ SERVICOS = [
     "Hidratação",
     "Escovação de Dente",
     "Remoção de Subpelo",
-    "SpaPet",  # Ventana e Vila Mariana
+    "SpaPet",  # Ventana, Vila Mariana Vila 11 e Frei Caneca Vila 11
 ]
 
 PORTES = ["P", "M", "G", "GG"]
@@ -65,7 +79,7 @@ PRECOS_REFERENCIA = {
         "Escovação de Dente": 5,
         "Remoção de Subpelo": 25,
     },
-    "Vila 11 Pinheiros": {
+    "Pinheiros Vila 11": {
         "Banho": {"P": 64, "M": 84, "G": 104, "GG": 124},
         "Tosa Completa Máquina": {"P": 129, "M": 159, "G": 189},
         "Tosa Completa Tesoura": {"P": 169, "M": 189, "G": 229},
@@ -74,7 +88,26 @@ PRECOS_REFERENCIA = {
         "Escovação de Dente": 5,
         "Remoção de Subpelo": 35,
     },
-    "Vila Mariana": {
+    "Melo Alves Vila 11": {
+        "Banho": {"P": 64, "M": 84, "G": 104, "GG": 124},
+        "Tosa Completa Máquina": {"P": 129, "M": 159, "G": 189},
+        "Tosa Completa Tesoura": {"P": 169, "M": 189, "G": 229},
+        "Tosa Higiênica": 25,
+        "Hidratação": 39,
+        "Escovação de Dente": 5,
+        "Remoção de Subpelo": 35,
+    },
+    "Frei Caneca Vila 11": {
+        "Banho": {"P": 59, "M": 79, "G": 99, "GG": 119},
+        "Tosa Completa Máquina": {"P": 129, "M": 149, "G": 179},
+        "Tosa Completa Tesoura": {"P": 169, "M": 189, "G": 229},
+        "Tosa Higiênica": 25,
+        "Hidratação": 39,
+        "Escovação de Dente": 5,
+        "Remoção de Subpelo": 35,
+        "SpaPet": 249,
+    },
+    "Vila Mariana Vila 11": {
         "Banho": {"P": 59, "M": 79, "G": 99, "GG": 119},
         "Tosa Completa Máquina": {"P": 129, "M": 149, "G": 179},
         "Tosa Completa Tesoura": {"P": 149, "M": 179, "G": 209},
